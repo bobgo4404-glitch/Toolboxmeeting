@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart TBM : Enterprise Safety Management</title>
+    
+    <!-- React & ReactDOM (Core) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel (Transpiler) -->
+    <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
+    
+    <!-- Tailwind CSS (Styling) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- PDF Generation Libs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <!-- FontAwesome & Google Fonts -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&display=swap" rel="stylesheet">
+    
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, where, updateDoc, setDoc, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+        
+        // --- Firebase Configuration ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyBYC9PUBg62xJi7L_C692VX6RwziN8B-GU",
+            authDomain: "dol-party.firebaseapp.com",
+            projectId: "dol-party",
+            storageBucket: "dol-party.firebasestorage.app",
+            messagingSenderId: "489405410374",
+            appId: "1:489405410374:web:9985f13204301ad3fcee47",
+            measurementId: "G-YKZ3LC9YL8"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Expose to window for React to use
+        window.db = db;
+        window.auth = auth;
+        window.firebaseModules = { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, where, updateDoc, setDoc, getDocs, getDoc, signInAnonymously };
+    </script>
+
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f3f4f6; }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .signature-font { font-family: 'Nanum Pen Script', cursive; font-size: 1.5rem; color: #1e40af; }
+        
+        /* Print/PDF specific styles */
+        .print-only { display: none; }
+        
+        /* Canvas specific */
+        canvas { touch-action: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+        const { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, where, updateDoc, setDoc, getDocs, getDoc, signInAnonymously } = window.firebaseModules;
+        const db = window.db;
+        const auth = window.auth;
+        const { jsPDF } = window.jspdf;
+
+        // --- Utils (ISO 8601 Standard) ---
+        const getWeekNumber = (d) => {
+            d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
+            const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+            const weekNo = Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
+            return weekNo;
+        };
+
+        const getFormattedWeek = (dateStr) => {
+            const d = new Date(dateStr);
+            const year = d.getFullYear();
+            const month = d.getMonth() + 1;
+            const firstDayOfMonth = new Date(year, month - 1, 1);
+            const firstDayOfWeek = firstDayOfMonth.getDay();
+            const offsetDate = d.getDate() + firstDayOfWeek - 1;
+            const weekOfMonth = Math.floor(offsetDate / 7) + 1;
+            return `${year}년 ${month}월 ${weekOfMonth}주차`;
+        };
+
+        // FIXED: ISO 8601 compliant week date range calculator
+        const getWeekDetails = (year, weekNo) => {
+            // ISO Week 1 is the week with the first Thursday of the year (Jan 4th is always in Week 1)
+            const jan4 = new Date(year, 0, 4);
+            const day = jan4.getDay() || 7; // Mon=1, Sun=7
+            const week1Start = new Date(jan4);
+            week1Start.setDate(jan4.getDate() - day + 1); // Start of ISO Week 1 (Monday)
+
+            // Calculate start date of the requested week
+            const start = new Date(week1Start);
+            start.setDate(week1Start.getDate() + (weekNo - 1) * 7);
+            
+            const end = new Date(start);
+            end.setDate(start.getDate() + 6);
+            
+            // Format dates
+            const fmt = (date) => `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
+            
+            // Determine month for label (based on Thursday of the week to handle month overlap)
+            const thursday = new Date(start);
+            thursday.setDate(start.getDate() + 3);
+            const month = thursday.getMonth() + 1;
+            
+            // Simple visual "Week of Month" for the label
+            const weekOfMonth = Math.ceil(start.getDate() / 7);
+
+            return {
+                startYear: start.getFullYear(),
+                label: `${year}년 ${month}월 ${weekOfMonth}주차 (${fmt(start)}~${fmt(end)})`,
+                value: `${year}-W${weekNo}`
+            };
+        };
+
+        // --- Error Boundary ---
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null };
+            }
+            static getDerivedStateFromError(error) { return { hasError: true, error }; }
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="flex flex-col items-center justify-center h-screen bg-red-50 text-red-800 p-8">
+                            <i className="fas fa-exclamation-triangle text-6xl mb-4"></i>
+                            <h1 className="text-3xl font-bold mb-2">시스템 오류 발생</h1>
+                            <p className="mb-6 text-center max-w-md">일시적인 오류가 발생했습니다.<br/>(Error: {this.state.error.message})</p>
+                            <button onClick={() => window.location.reload()} className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition shadow-lg">재시작</button>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
+        // --- Helper Components ---
+        const Toast = ({ message, type, onClose }) => {
+            useEffect(() => {
+                const timer = setTimeout(onClose, 3000);
+                return () => clearTimeout(timer);
+            }, []);
+            const bgClass = type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600';
+            return (
+                <div className={`fixed top-5 right-5 ${bgClass} text-white px-6 py-3 rounded-lg shadow-xl z-50 flex items-center animate-bounce-in z-50`}>
+                    <i className={`fas ${type === 'success' ? 'fa-check-circle' : 'fa-info-circle'} mr-3`}></i>
+                    {message}
+                </div>
+            );
+        };
+
+        // --- Chart Components ---
+        const KPICard = ({ title, value, icon, color, subtext }) => (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-start">
+                    <div>
+                        <p className="text-sm text-gray-500 mb-1 font-medium">{title}</p>
+                        <h3 className="text-3xl font-bold text-gray-800">{value}</h3>
+                    </div>
+                    <div className={`p-3 rounded-lg ${color} bg-opacity-10 text-${color.split('-')[1]}-600`}>
+                        <i className={`fas ${icon} text-xl`}></i>
+                    </div>
+                </div>
+                <p className="text-xs text-gray-400 mt-4">{subtext}</p>
+            </div>
+        );
+
+        const SimpleBarChart = ({ data }) => {
+            const values = data.map(d => d.value);
+            const maxVal = Math.max(...values);
+            const scaleMax = maxVal === 0 ? 5 : maxVal <= 5 ? maxVal + 2 : maxVal * 1.2;
+            
+            return (
+                <div className="h-64 flex items-end justify-around space-x-2 pt-10 border-b border-gray-200">
+                    {data.map((d, i) => (
+                        <div key={i} className="flex flex-col items-center w-full group">
+                            <div className="relative w-full flex justify-center h-full items-end">
+                                <div className="absolute -top-8 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                    {d.value}건
+                                </div>
+                                <div 
+                                    className="w-3/5 bg-indigo-500 rounded-t-md hover:bg-indigo-600 transition-all duration-500 relative"
+                                    style={{ height: `${(d.value / scaleMax) * 100}%`, minHeight: d.value > 0 ? '4px' : '0' }}
+                                >
+                                </div>
+                            </div>
+                            <span className="text-xs text-gray-500 mt-2 font-medium">{d.label}</span>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        const DonutChart = ({ data }) => {
+            const total = data.reduce((acc,cur) => acc + cur.value, 0); 
+            const renderTotal = total || 1; // Prevent division by zero only for scale calculation
+            const colors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b'];
+            
+            return (
+                <div className="flex flex-col items-center justify-center pt-2">
+                    <div className="relative w-40 h-40 rounded-full border-8 border-gray-100 flex items-center justify-center">
+                        {/* Only show color if there is actual data */}
+                        {total > 0 && (
+                            <div className="absolute inset-0 rounded-full opacity-20 bg-[conic-gradient(at_center,_var(--tw-gradient-stops))] from-indigo-500 via-purple-500 to-pink-500"></div>
+                        )}
+                        <div className="text-center">
+                            <div className="text-2xl font-bold text-gray-800">{total}</div>
+                            <div className="text-xs text-gray-500">Total</div>
+                        </div>
+                    </div>
+                    <div className="mt-6 w-full space-y-2">
+                        {total === 0 ? (
+                            <div className="text-center text-sm text-gray-400 py-4">등록된 데이터가 없습니다.</div>
+                        ) : (
+                            data.slice(0,4).map((d, i) => (
+                                <div key={i} className="flex justify-between text-sm px-4">
+                                    <span className="flex items-center"><span className="w-3 h-3 rounded-full mr-2" style={{backgroundColor: colors[i%4]}}></span>{d.label}</span>
+                                    <span className="font-bold">{Math.round((d.value/renderTotal)*100)}%</span>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const RiskGauge = ({ score }) => {
+            const rotation = (score / 100) * 180;
+            const color = score > 80 ? '#22c55e' : score > 50 ? '#eab308' : '#ef4444';
+            return (
+                <div className="relative w-48 h-24 overflow-hidden mx-auto mt-4">
+                    <div className="absolute top-0 left-0 w-full h-full bg-gray-200 rounded-t-full"></div>
+                    <div className="absolute top-0 left-0 w-full h-full rounded-t-full origin-bottom transform transition-transform duration-1000 ease-out" style={{ background: color, transform: `rotate(${rotation - 180}deg)` }}></div>
+                    <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/2 w-32 h-32 bg-white rounded-full flex items-center justify-center border-4 border-gray-100">
+                        <span className="text-2xl font-bold -mt-8 text-gray-700">{score}점</span>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Signature Pad Component ---
+        const SignatureModal = ({ isOpen, onClose, onSave, signerName }) => {
+            const canvasRef = useRef(null);
+            const isDrawing = useRef(false);
+            const [hasSigned, setHasSigned] = useState(false);
+
+            useEffect(() => {
+                if (isOpen && canvasRef.current) {
+                    const canvas = canvasRef.current;
+                    const ctx = canvas.getContext('2d');
+                    ctx.lineWidth = 3;
+                    ctx.lineCap = 'round';
+                    ctx.strokeStyle = 'black';
+                    
+                    setTimeout(() => {
+                        const rect = canvas.getBoundingClientRect();
+                        canvas.width = rect.width;
+                        canvas.height = rect.height;
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    }, 50);
+                    
+                    setHasSigned(false);
+                }
+            }, [isOpen]);
+
+            const getPos = (e) => {
+                const canvas = canvasRef.current;
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+
+                return {
+                    x: (clientX - rect.left) * scaleX,
+                    y: (clientY - rect.top) * scaleY
+                };
+            };
+
+            const startDrawing = (e) => {
+                isDrawing.current = true;
+                const { x, y } = getPos(e);
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+            };
+
+            const draw = (e) => {
+                if (!isDrawing.current) return;
+                e.preventDefault();
+                const { x, y } = getPos(e);
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.lineTo(x, y);
+                ctx.stroke();
+                setHasSigned(true);
+            };
+
+            const stopDrawing = () => {
+                isDrawing.current = false;
+            };
+
+            const handleSave = () => {
+                if (!hasSigned) return;
+                const dataUrl = canvasRef.current.toDataURL();
+                onSave(dataUrl);
+                onClose();
+            };
+
+            const handleClear = () => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                setHasSigned(false);
+            };
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col">
+                        <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
+                            <h3 className="font-bold text-lg text-gray-800"><i className="fas fa-pen-nib mr-2 text-indigo-600"></i>전자 서명 ({signerName})</h3>
+                            <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><i className="fas fa-times text-xl"></i></button>
+                        </div>
+                        <div className="p-4 bg-gray-100 flex-1 relative h-64">
+                            <canvas
+                                ref={canvasRef}
+                                style={{width: '100%', height: '100%'}}
+                                className="bg-white rounded border border-gray-300 shadow-inner block cursor-crosshair"
+                                onMouseDown={startDrawing}
+                                onMouseMove={draw}
+                                onMouseUp={stopDrawing}
+                                onMouseLeave={stopDrawing}
+                                onTouchStart={startDrawing}
+                                onTouchMove={draw}
+                                onTouchEnd={stopDrawing}
+                            />
+                            {!hasSigned && <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30 text-2xl font-bold text-gray-400">서명해 주세요</div>}
+                        </div>
+                        <div className="p-4 border-t flex justify-between gap-3">
+                            <button onClick={handleClear} className="px-4 py-2 border border-gray-300 text-gray-600 rounded hover:bg-gray-50"><i className="fas fa-eraser mr-1"></i> 지우기</button>
+                            <div className="flex gap-2">
+                                <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">취소</button>
+                                <button onClick={handleSave} disabled={!hasSigned} className={`px-6 py-2 text-white rounded font-bold shadow ${!hasSigned ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}>서명 완료</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Hidden PDF Generator (Auto Download - Fixed Layout) ---
+        const PdfHiddenGenerator = ({ tbm, onComplete }) => {
+            const printRef = useRef(null);
+            
+            useEffect(() => {
+                const generate = async () => {
+                    if(!printRef.current) return;
+                    try {
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        const canvas = await html2canvas(printRef.current, { scale: 2 });
+                        const imgData = canvas.toDataURL('image/png');
+                        const pdf = new jsPDF('p', 'mm', 'a4');
+                        const pdfWidth = pdf.internal.pageSize.getWidth();
+                        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                        pdf.save(`TBM_${tbm.date}_${tbm.department}.pdf`);
+                    } catch (e) {
+                        console.error("PDF Gen Error", e);
+                    } finally {
+                        onComplete();
+                    }
+                };
+                generate();
+            }, []);
+
+            return (
+                <div style={{ position: 'fixed', left: '-10000px', top: 0 }}>
+                    <div ref={printRef} className="bg-white p-8 text-black w-[210mm] min-h-[297mm] text-sm leading-relaxed border border-gray-300 font-sans">
+                        <h1 className="text-3xl font-bold text-center mb-8 pb-4 border-b-2 border-black">Tool Box Meeting 회의록</h1>
+                        
+                        <table className="w-full border-collapse border-2 border-black mb-6 table-fixed">
+                            <tbody>
+                                <tr className="h-10">
+                                    <th className="border border-black bg-gray-100 w-[15%] text-center align-middle font-bold" style={{verticalAlign: 'middle'}}>TBM 일시</th>
+                                    <td className="border border-black pl-2 align-middle" style={{verticalAlign: 'middle'}}>{tbm.date} {tbm.startTime} ~ {tbm.endTime}</td>
+                                    <th className="border border-black bg-gray-100 w-[15%] text-center align-middle font-bold" style={{verticalAlign: 'middle'}}>작성자</th>
+                                    <td className="border border-black pl-2 align-middle" style={{verticalAlign: 'middle'}}>{tbm.leader} ({tbm.department})</td>
+                                </tr>
+                                <tr className="h-10">
+                                    <th className="border border-black bg-gray-100 text-center align-middle font-bold" style={{verticalAlign: 'middle'}}>작업명</th>
+                                    <td colSpan="3" className="border border-black pl-2 align-middle font-bold" style={{verticalAlign: 'middle'}}>{tbm.workName}</td>
+                                </tr>
+                                <tr className="h-10">
+                                    <th className="border border-black bg-gray-100 text-center align-middle font-bold" style={{verticalAlign: 'middle'}}>작업장소</th>
+                                    <td className="border border-black pl-2 align-middle" style={{verticalAlign: 'middle'}}>{tbm.location}</td>
+                                    <th className="border border-black bg-gray-100 text-center align-middle font-bold text-xs" style={{verticalAlign: 'middle'}}>위험성평가<br/>실시여부</th>
+                                    <td className="border border-black pl-2 align-middle text-center" style={{verticalAlign: 'middle'}}>{tbm.riskAssessmentDone ? '☑ 예' : '☐ 아니오'}</td>
+                                </tr>
+                                <tr className="h-10">
+                                    <th className="border border-black bg-gray-100 text-center align-middle font-bold" style={{verticalAlign: 'middle'}}>현장 환경</th>
+                                    <td colSpan="3" className="border border-black pl-2 align-middle" style={{verticalAlign: 'middle'}}>
+                                        <span className="mr-6"><strong>온도:</strong> {tbm.temperature || '-'}℃</span>
+                                        <span><strong>습도:</strong> {tbm.humidity || '-'}%</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th className="border border-black bg-gray-100 text-center align-middle font-bold" style={{verticalAlign: 'middle'}}>작업내용</th>
+                                    <td colSpan="3" className="border border-black p-2 h-24 align-top whitespace-pre-wrap leading-normal" style={{verticalAlign: 'top'}}>{tbm.workDesc}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <div className="mb-6">
+                            <h4 className="font-bold mb-2 border-l-4 border-black pl-2">1. 위험요인 및 대책</h4>
+                            <table className="w-full border-collapse border border-black text-sm table-fixed">
+                                <thead>
+                                    <tr className="bg-gray-100 h-8">
+                                        <th className="border border-black w-[10%] text-center align-middle" style={{verticalAlign: 'middle'}}>No</th>
+                                        <th className="border border-black w-[45%] text-center align-middle" style={{verticalAlign: 'middle'}}>잠재위험요인</th>
+                                        <th className="border border-black w-[45%] text-center align-middle" style={{verticalAlign: 'middle'}}>안전대책</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {tbm.risks && tbm.risks.map((r, i) => (
+                                        <tr key={i} className="h-auto">
+                                            <td className="border border-black text-center align-middle p-1" style={{verticalAlign: 'middle'}}>{i+1}</td>
+                                            <td className="border border-black pl-2 align-middle p-1 whitespace-pre-wrap" style={{verticalAlign: 'middle'}}>{r.factor}</td>
+                                            <td className="border border-black pl-2 align-middle p-1 whitespace-pre-wrap" style={{verticalAlign: 'middle'}}>{r.measure}</td>
+                                        </tr>
+                                    ))}
+                                    {(!tbm.risks || tbm.risks.length === 0) && <tr><td colSpan="3" className="border border-black p-4 text-center">기록 없음</td></tr>}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="mb-6">
+                            <table className="w-full border-collapse border-2 border-black table-fixed">
+                                <tbody>
+                                    <tr>
+                                        <th className="border border-black bg-gray-100 w-[15%] text-center align-middle font-bold" rowSpan="2" style={{verticalAlign: 'middle'}}>중점위험<br/>요인</th>
+                                        <th className="border border-black w-[15%] text-center align-middle bg-gray-50" style={{verticalAlign: 'middle'}}>선정</th>
+                                        <td className="border border-black p-2 align-middle font-bold whitespace-pre-wrap" style={{verticalAlign: 'middle'}}>{tbm.keyRiskFactor || '-'}</td>
+                                    </tr>
+                                    <tr>
+                                        <th className="border border-black w-[15%] text-center align-middle bg-gray-50" style={{verticalAlign: 'middle'}}>대책</th>
+                                        <td className="border border-black p-2 align-middle text-blue-700 whitespace-pre-wrap" style={{verticalAlign: 'middle'}}>{tbm.keyRiskMeasure || '-'}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="mb-6">
+                            <h4 className="font-bold mb-2 border-l-4 border-black pl-2">2. 작업 전 안전조치 확인</h4>
+                            <table className="w-full border-collapse border border-black text-sm table-fixed">
+                                <thead>
+                                    <tr className="bg-gray-100 h-8">
+                                        <th className="border border-black w-[50%] text-center align-middle" style={{verticalAlign: 'middle'}}>잠재위험요소(중점위험 포함)</th>
+                                        <th className="border border-black w-[20%] text-center align-middle" style={{verticalAlign: 'middle'}}>조치 여부</th>
+                                        <th className="border border-black w-[30%] text-center align-middle" style={{verticalAlign: 'middle'}}>'아니오'인 경우 조치 내용</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {tbm.safetyActionChecks && tbm.safetyActionChecks.length > 0 ? (
+                                        tbm.safetyActionChecks.map((check, i) => (
+                                            <tr key={i} className="h-auto">
+                                                <td className="border border-black pl-2 align-middle p-1 whitespace-pre-wrap" style={{verticalAlign: 'middle'}}>{check.risk}</td>
+                                                <td className="border border-black text-center align-middle p-1" style={{verticalAlign: 'middle'}}>
+                                                    {check.result === 'yes' ? '☑ 예' : '☐ 아니오'}
+                                                </td>
+                                                <td className="border border-black pl-2 align-middle p-1 whitespace-pre-wrap" style={{verticalAlign: 'middle'}}>{check.action || '-'}</td>
+                                            </tr>
+                                        ))
+                                    ) : (
+                                        <tr><td colSpan="3" className="border border-black p-2 text-center text-gray-400">- 별도 기록 없음 -</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="mb-6">
+                            <h4 className="font-bold mb-2 border-l-4 border-black pl-2">3. 작업 전 일일 안전점검 시행 결과</h4>
+                            <div className="border border-black p-2 min-h-[50px] whitespace-pre-wrap">
+                                {tbm.dailyCheckResult || '특이사항 없음'}
+                            </div>
+                        </div>
+
+                        {tbm.photoUrl && (
+                            <div className="mb-6">
+                                <h4 className="font-bold mb-2 border-l-4 border-black pl-2">4. TBM 활동 사진</h4>
+                                <div className="border border-black p-2 flex justify-center">
+                                    <img src={tbm.photoUrl} alt="활동사진" className="max-h-60 object-contain" />
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="break-inside-avoid">
+                            <h4 className="font-bold mb-2 border-l-4 border-black pl-2">5. 참석자 명단 (총 {tbm.attendees?.length || 0}명)</h4>
+                            <div className="grid grid-cols-4 gap-0 border-2 border-black">
+                                <div className="bg-gray-100 border-r border-b border-black text-center p-1 font-bold" style={{verticalAlign: 'middle'}}>이름</div>
+                                <div className="bg-gray-100 border-r border-b border-black text-center p-1 font-bold" style={{verticalAlign: 'middle'}}>서명</div>
+                                <div className="bg-gray-100 border-r border-b border-black text-center p-1 font-bold" style={{verticalAlign: 'middle'}}>이름</div>
+                                <div className="bg-gray-100 border-b border-black text-center p-1 font-bold" style={{verticalAlign: 'middle'}}>서명</div>
+                                
+                                {tbm.attendees && tbm.attendees.map((att, i) => (
+                                    <React.Fragment key={i}>
+                                        <div className="border-r border-b border-black p-2 flex items-center justify-center h-16 font-bold">{att.name}</div>
+                                        <div className={`border-b border-black p-1 flex items-center justify-center h-16 ${i % 2 === 0 ? 'border-r' : ''}`}>
+                                            {att.signatureUrl ? (
+                                                <img src={att.signatureUrl} alt="서명" className="max-h-12 max-w-full object-contain" />
+                                            ) : <span className="text-gray-300 text-xs">(미서명)</span>}
+                                        </div>
+                                    </React.Fragment>
+                                ))}
+                                {tbm.attendees && tbm.attendees.length % 2 !== 0 && (
+                                    <>
+                                        <div className="border-r border-b border-black p-2 h-16"></div>
+                                        <div className="border-b border-black p-1 h-16"></div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Weekly Status Panel (Updated Logic: Sort Alphabetically) ---
+        const WeeklyStatusPanel = ({ accounts, tbms, currentYear }) => {
+            const [selectedWeek, setSelectedWeek] = useState(`${currentYear}-W${getWeekNumber(new Date())}`);
+            
+            useEffect(() => {
+                setSelectedWeek(`${currentYear}-W${getWeekNumber(new Date())}`);
+            }, [currentYear]);
+
+            const weekOptions = useMemo(() => {
+                const weeks = [];
+                for(let i=1; i<=53; i++) {
+                    const details = getWeekDetails(parseInt(currentYear), i);
+                    if (details.startYear > parseInt(currentYear)) continue;
+                    weeks.push(details);
+                }
+                return weeks;
+            }, [currentYear]);
+
+            const handleSendEmail = (deptName) => {
+                const subject = `[TBM 미제출 알림] ${selectedWeek} ${deptName}`;
+                const body = `${deptName} 담당자님,\n\n${selectedWeek} TBM 활동 내역이 아직 제출되지 않았습니다.\n확인 후 제출 부탁드립니다.\n\n감사합니다.`;
+                const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                window.location.href = mailtoLink;
+            };
+
+            const statusData = useMemo(() => {
+                // Filter masters and Sort alphabetically (Ga-Na-Da)
+                const deptList = accounts
+                    .filter(a => a.role !== 'master')
+                    .map(a => a.department)
+                    .sort((a, b) => a.localeCompare(b, 'ko')); // Added sorting here for explicit order
+                
+                const selectedWeekNum = parseInt(selectedWeek.split('-W')[1]);
+                
+                const result = deptList.map(dept => {
+                    const submitted = tbms.find(t => {
+                        if (t.department !== dept) return false;
+                        if (!t.date.startsWith(currentYear)) return false;
+                        return getWeekNumber(new Date(t.date)) === selectedWeekNum;
+                    });
+                    return { department: dept, submitted: !!submitted, data: submitted };
+                });
+                return result;
+            }, [accounts, tbms, selectedWeek, currentYear]);
+
+            return (
+                <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-4 mb-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
+                        <h3 className="font-bold text-indigo-800"><i className="fas fa-calendar-check mr-2"></i>주간 부서별 제출 현황</h3>
+                        <select className="border border-indigo-200 rounded px-3 py-1 text-sm bg-white w-full sm:w-auto font-bold text-gray-700" value={selectedWeek} onChange={e=>setSelectedWeek(e.target.value)}>
+                            {weekOptions.map(w => <option key={w.value} value={w.value}>{w.label}</option>)}
+                        </select>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                        {statusData.map(s => (
+                            <div key={s.department} className={`p-3 rounded border text-center transition flex flex-col items-center justify-center ${s.submitted ? 'bg-white border-green-200 shadow-sm' : 'bg-gray-50 border-red-200 opacity-80'}`}>
+                                <div className="text-xs text-gray-500 mb-1">{s.department}</div>
+                                {s.submitted ? (
+                                    <div className="text-green-600 font-bold text-sm"><i className="fas fa-check-circle mr-1"></i>제출완료</div>
+                                ) : (
+                                    <>
+                                        <div className="text-red-400 font-bold text-sm mb-1"><i className="fas fa-times-circle mr-1"></i>미제출</div>
+                                        <button 
+                                            onClick={() => handleSendEmail(s.department)}
+                                            className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 w-full"
+                                        >
+                                            <i className="fas fa-envelope mr-1"></i>독려 메일
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Settings View (Master Only) ---
+        const SettingsView = ({ availableYears, setAvailableYears }) => {
+            const [newYear, setNewYear] = useState('');
+
+            const handleAddYear = async () => {
+                if (!newYear || availableYears.includes(newYear)) return;
+                const updated = [...availableYears, newYear].sort();
+                setAvailableYears(updated);
+                await setDoc(doc(db, "system_settings", "config"), { years: updated });
+                setNewYear('');
+            };
+
+            const handleRemoveYear = async (year) => {
+                if (availableYears.length <= 1) return alert("최소 1개의 연도는 필요합니다.");
+                const updated = availableYears.filter(y => y !== year);
+                setAvailableYears(updated);
+                await setDoc(doc(db, "system_settings", "config"), { years: updated });
+            };
+
+            return (
+                <div className="bg-white p-8 rounded-xl shadow animate-fade-in-up">
+                    <h2 className="text-2xl font-bold text-gray-800 mb-6 border-b pb-2"><i className="fas fa-cog mr-2"></i>시스템 설정</h2>
+                    <div className="mb-8">
+                        <h3 className="font-bold text-lg mb-4 text-gray-700">📅 조회 연도 관리</h3>
+                        <div className="flex gap-2 mb-4">
+                            <input type="number" className="border rounded px-4 py-2 w-48" placeholder="예: 2027" value={newYear} onChange={e => setNewYear(e.target.value)} />
+                            <button onClick={handleAddYear} className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">추가</button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {availableYears.map(year => (
+                                <div key={year} className="bg-gray-100 px-4 py-2 rounded-full flex items-center gap-2 border">
+                                    <span className="font-bold">{year}년</span>
+                                    <button onClick={() => handleRemoveYear(year)} className="text-red-400 hover:text-red-600"><i className="fas fa-times-circle"></i></button>
+                                </div>
+                            ))}
+                        </div>
+                        <p className="text-sm text-gray-400 mt-2">* 이곳에서 설정한 연도만 대시보드와 이력 조회 필터에 표시됩니다.</p>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- View Components ---
+        const LoginView = ({ loginId, setLoginId, loginPw, setLoginPw, handleLogin, saveId, setSaveId, loading }) => (
+            <div className="min-h-screen flex items-center justify-center bg-slate-100">
+                <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md border-t-4 border-indigo-600">
+                    <div className="text-center mb-8">
+                        <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl"><i className="fas fa-shield-alt"></i></div>
+                        <h2 className="text-2xl font-bold text-gray-800">Smart TBM System</h2>
+                        <p className="text-gray-500 mt-2 text-sm">안전한 작업을 위한 첫걸음</p>
+                    </div>
+                    <form onSubmit={handleLogin} className="space-y-6">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">아이디 (부서코드)</label>
+                            <input type="text" className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 transition outline-none" placeholder="admin or dept_id" value={loginId} onChange={e => setLoginId(e.target.value)} required />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">비밀번호</label>
+                            <input type="password" className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 transition outline-none" placeholder="••••••" value={loginPw} onChange={e => setLoginPw(e.target.value)} required />
+                        </div>
+                        <div className="flex items-center">
+                            <input id="saveId" type="checkbox" className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" checked={saveId} onChange={e => setSaveId(e.target.checked)} />
+                            <label htmlFor="saveId" className="ml-2 block text-sm text-gray-900">아이디 저장</label>
+                        </div>
+                        <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition font-bold shadow-lg transform active:scale-95">{loading ? <i className="fas fa-spinner fa-spin"></i> : '로그인'}</button>
+                    </form>
+                </div>
+            </div>
+        );
+
+        const Sidebar = ({ user, view, setView, handleLogout }) => (
+            <div className="w-64 bg-slate-900 text-white h-screen fixed left-0 top-0 flex flex-col shadow-2xl z-20">
+                <div className="p-6 border-b border-slate-700">
+                    <h1 className="text-xl font-bold tracking-wider text-yellow-400"><i className="fas fa-hard-hat mr-2"></i>Smart TBM</h1>
+                    <p className="text-xs text-slate-400 mt-1">Enterprise EHS System</p>
+                </div>
+                <div className="p-4 border-b border-slate-800 bg-slate-800 bg-opacity-50">
+                    <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 rounded-full bg-indigo-500 flex items-center justify-center text-lg font-bold">{user.department.substring(0,1)}</div>
+                        <div>
+                            <p className="font-medium text-sm">{user.department}</p>
+                            <p className="text-xs text-slate-400 capitalize">{user.role}</p>
+                        </div>
+                    </div>
+                </div>
+                <nav className="flex-1 p-4 space-y-2 mt-2">
+                    <button onClick={() => setView('dashboard')} className={`w-full text-left p-3 rounded-lg flex items-center transition ${view === 'dashboard' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}><i className="fas fa-chart-pie w-6"></i> 대시보드</button>
+                    <button onClick={() => setView('write')} className={`w-full text-left p-3 rounded-lg flex items-center transition ${view === 'write' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}><i className="fas fa-edit w-6"></i> TBM 등록</button>
+                    <button onClick={() => setView('list')} className={`w-full text-left p-3 rounded-lg flex items-center transition ${view === 'list' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}><i className="fas fa-list-alt w-6"></i> TBM 이력조회</button>
+                    {user.role === 'master' && (
+                        <>
+                            <div className="my-4 border-t border-slate-700"></div>
+                            <button onClick={() => setView('admin')} className={`w-full text-left p-3 rounded-lg flex items-center transition ${view === 'admin' ? 'bg-pink-600 text-white' : 'text-pink-400 hover:bg-slate-800 hover:text-white'}`}><i className="fas fa-users-cog w-6"></i> 계정/권한 관리</button>
+                            <button onClick={() => setView('settings')} className={`w-full text-left p-3 rounded-lg flex items-center transition ${view === 'settings' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-slate-800 hover:text-white'}`}><i className="fas fa-cog w-6"></i> 시스템 설정</button>
+                        </>
+                    )}
+                </nav>
+                <div className="p-4 border-t border-slate-700">
+                    <button onClick={handleLogout} className="w-full py-2 px-4 border border-slate-600 rounded text-slate-300 hover:bg-slate-700 transition flex items-center justify-center text-sm"><i className="fas fa-sign-out-alt mr-2"></i> 로그아웃</button>
+                </div>
+            </div>
+        );
+
+        const DashboardView = ({ stats, tbms, currentYear, setCurrentYear, allTbms, availableYears }) => {
+            const riskCategoryData = useMemo(() => {
+                const risks = {};
+                tbms.forEach(tbm => tbm.risks?.forEach(r => {
+                    const key = (r.factor || "기타").split(' ')[0] || "기타";
+                    risks[key] = (risks[key] || 0) + 1;
+                }));
+                return Object.entries(risks).map(([label, value]) => ({label, value}));
+            }, [tbms]);
+
+            // NOTE: deptRankingData Removed as per request
+
+            // New: Calculate Safety Score based on Risk Assessment Rate
+            const safetyScore = useMemo(() => {
+                if (stats.total === 0) return 0;
+                return Math.round((stats.safeCount / stats.total) * 100);
+            }, [stats]);
+
+            const getScoreMessage = (score) => {
+                if (stats.total === 0) return "데이터가 수집되지 않았습니다.";
+                if (score >= 90) return "훌륭합니다! 현재 최고 수준의 안전 관리가 이루어지고 있습니다.";
+                if (score >= 70) return "양호합니다. 지속적인 위험 요인 발굴과 관심이 필요합니다.";
+                return "주의가 필요합니다. 위험성 평가 실시율을 높이고 안전 조치를 강화해주세요.";
+            };
+
+            return (
+                <div className="space-y-6 animate-fade-in-up">
+                    <div className="flex justify-between items-end">
+                        <div>
+                            <h2 className="text-2xl font-bold text-gray-800">EHS 경영 대시보드</h2>
+                            <p className="text-gray-500">실시간 안전 활동 현황 리포트</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                             <select className="bg-white border border-gray-300 text-gray-700 py-1 px-3 rounded-lg font-bold" value={currentYear} onChange={(e) => setCurrentYear(e.target.value)}>
+                                {availableYears.map(y => <option key={y} value={y}>{y}년</option>)}
+                            </select>
+                            <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold">{new Date().toLocaleDateString()} 기준</span>
+                        </div>
+                    </div>
+
+                    {/* Row 1: KPI Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <KPICard title={`${currentYear}년 총 TBM 수행`} value={`${stats.total}회`} icon="fa-clipboard-check" color="bg-blue-500" subtext="전년 동기 대비 12% 증가" />
+                        <KPICard title="위험성 평가 실시율" value={`${stats.total ? Math.round((stats.safeCount/stats.total)*100) : 0}%`} icon="fa-shield-virus" color="bg-green-500" subtext="목표치 95% 달성 중" />
+                        <KPICard title="참여 작업자 수" value={`${tbms.reduce((acc, cur) => acc + (cur.attendees?.length || 0), 0)}명`} icon="fa-users" color="bg-purple-500" subtext="금일 현장 투입 인원" />
+                    </div>
+
+                    {/* Row 2: Monthly Activity (Full Width for 12 months) */}
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <h3 className="font-bold text-gray-700 mb-4 border-l-4 border-indigo-500 pl-3">월별 TBM 활동 추이 (연간)</h3>
+                        <SimpleBarChart data={stats.monthlyData} />
+                    </div>
+
+                    {/* Row 3: Safety Index & Risk Analysis */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Safety Index (Moved from Row 2) */}
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 text-center">
+                            <h3 className="font-bold text-gray-700 mb-2 border-l-4 border-green-500 pl-3 text-left">종합 안전 지수</h3>
+                            <RiskGauge score={safetyScore} />
+                            <div className="mt-4 p-3 bg-gray-50 rounded text-left text-sm text-gray-600">
+                                <i className="fas fa-quote-left mr-2 text-gray-400"></i>
+                                {getScoreMessage(safetyScore)}
+                            </div>
+                        </div>
+                        {/* Risk Analysis (Kept here) */}
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <h3 className="font-bold text-gray-700 mb-4 border-l-4 border-orange-500 pl-3">위험 요인 유형 분석</h3>
+                            <DonutChart data={riskCategoryData} />
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ListView = ({ user, myTbms, setView, accounts, allTbms, currentYear, setCurrentYear, onEdit, onDelete, onPdfDownload, availableYears }) => {
+            return (
+                <div className="bg-white rounded-xl shadow border border-gray-200 animate-fade-in-up">
+                    <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                        <div>
+                            <h2 className="text-xl font-bold text-gray-800">TBM 이력 조회</h2>
+                            <p className="text-sm text-gray-500">{user.role === 'master' ? '전사 통합 관리 모드' : `${user.department} 활동 내역`}</p>
+                        </div>
+                        <div className="flex gap-2">
+                            <select className="bg-gray-50 border border-gray-300 text-gray-700 py-1 px-3 rounded shadow-sm" value={currentYear} onChange={(e) => setCurrentYear(e.target.value)}>
+                                {availableYears.map(y => <option key={y} value={y}>{y}년</option>)}
+                            </select>
+                            <button onClick={() => setView('write')} className="bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700 text-sm"><i className="fas fa-plus mr-1"></i> 신규 등록</button>
+                        </div>
+                    </div>
+                    
+                    {/* Weekly Status Panel (Sorted by Dept Name) */}
+                    {user.role === 'master' && (
+                        <div className="px-6 pt-6">
+                            <WeeklyStatusPanel accounts={accounts} tbms={allTbms} currentYear={currentYear} />
+                        </div>
+                    )}
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="bg-gray-50 text-gray-500 text-sm uppercase tracking-wider">
+                                    <th className="p-4 font-medium">기간 (주차)</th>
+                                    <th className="p-4 font-medium">부서</th>
+                                    <th className="p-4 font-medium">작업명</th>
+                                    <th className="p-4 font-medium">리더</th>
+                                    <th className="p-4 font-medium text-center">관리</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {myTbms.length === 0 ? (
+                                    <tr><td colSpan="5" className="p-8 text-center text-gray-400">{currentYear}년도 등록된 TBM 내역이 없습니다.</td></tr>
+                                ) : myTbms.map(tbm => (
+                                    <tr key={tbm.id} className="hover:bg-gray-50 transition">
+                                        <td className="p-4 text-sm text-gray-600 font-bold">{getFormattedWeek(tbm.date)}<div className="text-xs text-gray-400 font-normal">{tbm.date}</div></td>
+                                        <td className="p-4 text-sm font-bold text-indigo-600">{tbm.department}</td>
+                                        <td className="p-4 text-sm font-medium text-gray-800">{tbm.workName}</td>
+                                        <td className="p-4 text-sm text-gray-600">{tbm.leader}</td>
+                                        <td className="p-4 text-center">
+                                            <div className="flex justify-center gap-2">
+                                                <button onClick={() => onEdit(tbm)} className="text-indigo-500 hover:bg-indigo-50 p-2 rounded text-xs border border-indigo-200"><i className="fas fa-edit"></i> 수정</button>
+                                                <button onClick={() => onDelete(tbm.id)} className="text-red-500 hover:bg-red-50 p-2 rounded text-xs border border-red-200"><i className="fas fa-trash"></i> 삭제</button>
+                                                {user.role === 'master' && (
+                                                    <button onClick={() => onPdfDownload(tbm)} className="text-green-600 hover:bg-green-50 p-2 rounded text-xs border border-green-200"><i className="fas fa-file-pdf"></i> PDF</button>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        };
+
+        const AdminView = ({ accounts, showToast }) => {
+            const [newAcc, setNewAcc] = useState({ username: '', password: '', department: '생산팀', role: 'user' });
+            const [editingId, setEditingId] = useState(null);
+            const [newPassword, setNewPassword] = useState('');
+
+            const handleCreateAccount = async () => {
+                if(!newAcc.username || !newAcc.password) return showToast('정보를 입력하세요', 'error');
+                try {
+                    await addDoc(collection(db, "app_users"), newAcc);
+                    showToast('계정이 생성되었습니다.', 'success');
+                    setNewAcc({ username: '', password: '', department: '생산팀', role: 'user' });
+                } catch(e) { showToast('생성 실패', 'error'); }
+            };
+            const handleDeleteAccount = async (id) => { if(confirm("삭제하시겠습니까?")) await deleteDoc(doc(db, "app_users", id)); };
+            const handleUpdatePassword = async (id) => {
+                if(!newPassword) return;
+                await updateDoc(doc(db, "app_users", id), { password: newPassword });
+                showToast('비밀번호 변경 완료', 'success');
+                setEditingId(null);
+            };
+
+            // Explicit sort for rendering
+            const sortedAccounts = [...accounts].sort((a, b) => (a.department || '').localeCompare(b.department || '', 'ko'));
+
+            return (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in-up">
+                    <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow h-fit">
+                        <h3 className="font-bold text-lg mb-4 text-gray-800">새 계정 생성</h3>
+                        <div className="space-y-4">
+                            <input type="text" className="input-field" placeholder="아이디" value={newAcc.username} onChange={e=>setNewAcc({...newAcc, username: e.target.value})} />
+                            <input type="password" className="input-field" placeholder="비밀번호" value={newAcc.password} onChange={e=>setNewAcc({...newAcc, password: e.target.value})} />
+                            <input type="text" className="input-field" placeholder="부서명" value={newAcc.department} onChange={e=>setNewAcc({...newAcc, department: e.target.value})} />
+                            <select className="input-field" value={newAcc.role} onChange={e=>setNewAcc({...newAcc, role: e.target.value})}>
+                                <option value="user">User</option>
+                                <option value="master">Master</option>
+                            </select>
+                            <button onClick={handleCreateAccount} className="w-full bg-pink-600 text-white py-2 rounded font-bold hover:bg-pink-700 transition">계정 생성</button>
+                        </div>
+                    </div>
+                    <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow">
+                        <h3 className="font-bold text-lg mb-4 text-gray-800">등록된 계정 목록 (가나다순)</h3>
+                        <div className="grid gap-3">
+                            {sortedAccounts.map(acc => (
+                                <div key={acc.id} className="flex flex-col sm:flex-row justify-between items-center p-3 border rounded hover:bg-gray-50 gap-3">
+                                    <div className="flex-1"><span className="font-bold text-gray-700">{acc.department}</span> ({acc.username})</div>
+                                    <div className="flex items-center gap-2">
+                                        {editingId === acc.id ? (
+                                            <div className="flex gap-1">
+                                                <input type="text" className="border rounded px-2 py-1 text-sm w-32" value={newPassword} onChange={e=>setNewPassword(e.target.value)} />
+                                                <button onClick={()=>handleUpdatePassword(acc.id)} className="bg-green-500 text-white px-2 py-1 rounded text-xs">저장</button>
+                                                <button onClick={()=>{setEditingId(null); setNewPassword('')}} className="bg-gray-300 text-white px-2 py-1 rounded text-xs">취소</button>
+                                            </div>
+                                        ) : <button onClick={()=>{setEditingId(acc.id); setNewPassword('')}} className="text-indigo-500 border border-indigo-200 px-3 py-1 rounded text-sm">비번변경</button>}
+                                        <button onClick={() => handleDeleteAccount(acc.id)} className="text-red-500 border border-red-200 px-3 py-1 rounded text-sm">삭제</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const TBMFormView = ({ user, setView, showToast, setLoading, initialData }) => {
+            const [form, setForm] = useState(initialData || {
+                date: new Date().toISOString().split('T')[0],
+                // Updated default times
+                startTime: '09:00',
+                endTime: '18:00',
+                temperature: '',
+                humidity: '',
+                workName: '',
+                workDesc: '',
+                location: '',
+                riskAssessmentDone: false,
+                risks: [{ id: 1, factor: '', measure: '' }],
+                keyRiskId: '',
+                leader: user.username,
+                preChecks: { check1: false, check2: false, check3: false },
+                safetyActionChecks: [{ risk: '', result: 'yes', action: '' }],
+                // New Fields
+                dailyCheckResult: '특이사항 없음',
+                photoUrl: '',
+                attendees: [{ name: '', signed: false, signatureUrl: '' }]
+            });
+            const [showSignModal, setShowSignModal] = useState(false);
+            const [currentSignerIndex, setCurrentSignerIndex] = useState(null);
+
+            const addRiskRow = () => setForm(p => ({...p, risks: [...p.risks, { id: Date.now(), factor: '', measure: '' }]}));
+            const updateRisk = (id, f, v) => setForm(p => ({...p, risks: p.risks.map(r => r.id===id ? {...r, [f]: v} : r)}));
+            const removeRisk = (id) => setForm(p => ({...p, risks: p.risks.filter(r => r.id !== id)}));
+            const addAttendee = () => setForm(p => ({...p, attendees: [...p.attendees, { name: '', signed: false, signatureUrl: '' }]}));
+            
+            // New: Remove Attendee Function
+            const removeAttendee = (idx) => {
+                const newAtt = form.attendees.filter((_, i) => i !== idx);
+                setForm({ ...form, attendees: newAtt });
+            };
+
+            const updateAttendee = (idx, name) => {
+                const newAtt = [...form.attendees];
+                newAtt[idx].name = name;
+                setForm({...form, attendees: newAtt});
+            };
+            const openSignModal = (idx) => {
+                if (!form.attendees[idx].name) return showToast("이름을 먼저 입력하세요.", "error");
+                setCurrentSignerIndex(idx);
+                setShowSignModal(true);
+            };
+            const handleSaveSignature = (dataUrl) => {
+                const newAtt = [...form.attendees];
+                newAtt[currentSignerIndex].signed = true;
+                newAtt[currentSignerIndex].signatureUrl = dataUrl;
+                setForm({ ...form, attendees: newAtt });
+            };
+            
+            // New: Safety Action Methods
+            const syncRisksToActions = () => {
+                const newActions = form.risks.filter(r => r.factor.trim() !== '').map(r => ({
+                    risk: r.factor,
+                    result: 'yes',
+                    action: ''
+                }));
+                if (newActions.length === 0) return showToast("입력된 잠재위험요인이 없습니다.", "info");
+                setForm(prev => ({...prev, safetyActionChecks: newActions}));
+                showToast("위험요인을 불러왔습니다.", "success");
+            };
+            const updateActionCheck = (idx, f, v) => {
+                const newChecks = [...form.safetyActionChecks];
+                newChecks[idx][f] = v;
+                setForm({...form, safetyActionChecks: newChecks});
+            };
+
+            // Photo Upload
+            const handlePhotoUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        setForm(prev => ({...prev, photoUrl: reader.result}));
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const handleSubmit = async () => {
+                if(!form.workName || !form.location) return showToast("필수 정보를 입력하세요.", "error");
+                setLoading(true);
+                try {
+                    const selectedRisk = form.risks.find(r => r.id == form.keyRiskId);
+                    const docData = {
+                        ...form,
+                        department: user.department,
+                        keyRiskFactor: selectedRisk ? selectedRisk.factor : 'N/A',
+                        keyRiskMeasure: selectedRisk ? selectedRisk.measure : 'N/A',
+                        updatedAt: new Date().toISOString()
+                    };
+                    if (!initialData) {
+                        docData.createdBy = user.username;
+                        docData.createdAt = new Date().toISOString();
+                        await addDoc(collection(db, "global_tbm_data"), docData);
+                        showToast("등록 완료", "success");
+                    } else {
+                        await updateDoc(doc(db, "global_tbm_data", initialData.id), docData);
+                        showToast("수정 완료", "success");
+                    }
+                    setView('list');
+                } catch (err) { showToast("오류 발생", "error"); }
+                setLoading(false);
+            };
+
+            return (
+                <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden max-w-4xl mx-auto animate-fade-in-up">
+                    <div className="bg-gray-800 text-white p-4 flex justify-between items-center">
+                        <h2 className="text-xl font-bold"><i className="fas fa-edit mr-2"></i>{initialData ? "TBM 수정" : "TBM 등록"}</h2>
+                        <span className="text-sm bg-gray-700 px-3 py-1 rounded">{user.department}</span>
+                    </div>
+                    <div className="p-8 space-y-8">
+                        <section>
+                            <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">1. 작업 개요</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label className="label-text">일시</label>
+                                    <div className="flex gap-2 items-center flex-wrap">
+                                        <input type="date" className="input-field flex-grow" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} />
+                                        <div className="flex items-center gap-1">
+                                            <input type="time" className="input-field w-24" value={form.startTime} onChange={e=>setForm({...form, startTime:e.target.value})} />
+                                            <span>~</span>
+                                            <input type="time" className="input-field w-24" value={form.endTime} onChange={e=>setForm({...form, endTime:e.target.value})} />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="label-text">장소</label>
+                                    <input type="text" className="input-field" value={form.location} onChange={e=>setForm({...form, location:e.target.value})} />
+                                </div>
+                                <div className="flex gap-4 md:col-span-2">
+                                    <div className="flex-1">
+                                        <label className="label-text">온도 (℃)</label>
+                                        <input type="number" className="input-field" placeholder="예: 25" value={form.temperature} onChange={e=>setForm({...form, temperature:e.target.value})} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="label-text">습도 (%)</label>
+                                        <input type="number" className="input-field" placeholder="예: 50" value={form.humidity} onChange={e=>setForm({...form, humidity:e.target.value})} />
+                                    </div>
+                                </div>
+                                <div className="md:col-span-2"><label className="label-text">작업명</label><input type="text" className="input-field" value={form.workName} onChange={e=>setForm({...form, workName:e.target.value})} /></div>
+                                <div className="md:col-span-2">
+                                    <label className="label-text flex items-center justify-between">내용 <i className="fas fa-microphone text-gray-400 hover:text-indigo-500 cursor-pointer" title="음성 입력 (지원 예정)"></i></label>
+                                    <textarea className="input-field h-20" value={form.workDesc} onChange={e=>setForm({...form, workDesc:e.target.value})}></textarea>
+                                </div>
+                            </div>
+                        </section>
+                        <section className="bg-yellow-50 p-6 rounded-lg border border-yellow-200">
+                             <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-yellow-800">2. 위험성 평가</h3>
+                                <div className="flex items-center gap-2"><span className="text-sm font-bold">실시여부</span><input type="checkbox" className="w-5 h-5" checked={form.riskAssessmentDone} onChange={e=>setForm({...form, riskAssessmentDone: e.target.checked})} /></div>
+                            </div>
+                            <div className="space-y-2">
+                                {form.risks.map((risk, idx) => (
+                                    <div key={risk.id} className="grid grid-cols-12 gap-2 items-center">
+                                        <div className="col-span-1 text-center font-bold bg-white rounded-full w-6 h-6">{idx+1}</div>
+                                        <div className="col-span-5"><input type="text" className="input-field py-1 text-sm" placeholder="위험요인" value={risk.factor} onChange={e=>updateRisk(risk.id, 'factor', e.target.value)} /></div>
+                                        <div className="col-span-5"><input type="text" className="input-field py-1 text-sm" placeholder="대책" value={risk.measure} onChange={e=>updateRisk(risk.id, 'measure', e.target.value)} /></div>
+                                        <div className="col-span-1 text-center"><button onClick={()=>removeRisk(risk.id)} className="text-red-400"><i className="fas fa-times"></i></button></div>
+                                    </div>
+                                ))}
+                                <button onClick={addRiskRow} className="w-full py-2 border-2 border-dashed border-gray-300 text-gray-500 rounded text-sm hover:bg-white">+ 위험요인 추가</button>
+                            </div>
+                            <div className="mt-4"><label className="label-text text-red-600 font-bold">중점 위험요인 선택</label><select className="input-field" value={form.keyRiskId} onChange={e=>setForm({...form, keyRiskId: e.target.value})}><option value="">선택하세요</option>{form.risks.map((r,i)=>(<option key={r.id} value={r.id}>{i+1}. {r.factor}</option>))}</select></div>
+                        </section>
+                        
+                        <section className="bg-blue-50 p-6 rounded-lg border border-blue-200">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-blue-800">3. 작업 전 안전조치 확인</h3>
+                                <button onClick={syncRisksToActions} className="bg-white border border-blue-300 text-blue-600 text-xs px-3 py-1 rounded hover:bg-blue-100 font-bold"><i className="fas fa-sync mr-1"></i>위험요인 불러오기</button>
+                            </div>
+                            <div className="space-y-3">
+                                <div className="grid grid-cols-12 gap-2 text-xs font-bold text-gray-500 text-center">
+                                    <div className="col-span-5">위험요소</div>
+                                    <div className="col-span-2">조치여부</div>
+                                    <div className="col-span-5">미조치 시 내용</div>
+                                </div>
+                                {form.safetyActionChecks && form.safetyActionChecks.map((check, idx) => (
+                                    <div key={idx} className="grid grid-cols-12 gap-2 items-center bg-white p-2 rounded border border-blue-100">
+                                        <div className="col-span-5 text-sm font-bold text-gray-700">{check.risk || '입력 필요'}</div>
+                                        <div className="col-span-2 text-center">
+                                            <select className="border rounded py-1 text-xs" value={check.result} onChange={e=>updateActionCheck(idx, 'result', e.target.value)}>
+                                                <option value="yes">예</option>
+                                                <option value="no">아니오</option>
+                                            </select>
+                                        </div>
+                                        <div className="col-span-5">
+                                            <input type="text" className="input-field py-1 text-xs" placeholder="내용 입력" value={check.action} onChange={e=>updateActionCheck(idx, 'action', e.target.value)} disabled={check.result === 'yes'} />
+                                        </div>
+                                    </div>
+                                ))}
+                                {(!form.safetyActionChecks || form.safetyActionChecks.length === 0) && <div className="text-center text-gray-400 text-sm py-4">위험요인 불러오기 버튼을 눌러주세요.</div>}
+                            </div>
+                        </section>
+
+                        <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                                <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">4. 작업 전 안전 점검 (Checklist)</h3>
+                                <div className="space-y-2 mb-6">
+                                    <label className="flex items-center p-2 border rounded bg-white"><input type="checkbox" className="mr-2" checked={form.preChecks.check1} onChange={e=>setForm({...form, preChecks:{...form.preChecks, check1:e.target.checked}})} />보호구 착용</label>
+                                    <label className="flex items-center p-2 border rounded bg-white"><input type="checkbox" className="mr-2" checked={form.preChecks.check2} onChange={e=>setForm({...form, preChecks:{...form.preChecks, check2:e.target.checked}})} />장비 점검</label>
+                                    <label className="flex items-center p-2 border rounded bg-white"><input type="checkbox" className="mr-2" checked={form.preChecks.check3} onChange={e=>setForm({...form, preChecks:{...form.preChecks, check3:e.target.checked}})} />건강 상태</label>
+                                </div>
+                                <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">작업 전 일일 안전점검 시행 결과</h3>
+                                <textarea className="input-field h-24" placeholder="특이사항 없음" value={form.dailyCheckResult} onChange={e=>setForm({...form, dailyCheckResult:e.target.value})}></textarea>
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">5. 참석자 ({form.attendees.length}명)</h3>
+                                <div className="bg-gray-50 p-4 rounded h-40 overflow-y-auto space-y-2 mb-4">
+                                    {form.attendees.map((att, idx) => (
+                                        <div key={idx} className="flex items-center gap-2 bg-white p-2 rounded border shadow-sm">
+                                            <input type="text" placeholder="이름" className="border border-gray-300 rounded px-3 py-2 text-sm flex-1 text-center font-bold outline-none focus:ring-2 focus:ring-indigo-500 h-12" value={att.name} onChange={e=>updateAttendee(idx, e.target.value)} disabled={att.signed} />
+                                            <div onClick={()=>!att.signed && openSignModal(idx)} className={`flex-1 h-12 border rounded flex items-center justify-center cursor-pointer transition ${att.signed ? 'bg-white border-indigo-500' : 'bg-gray-50 border-dashed hover:bg-indigo-50'}`}>
+                                                {att.signed && att.signatureUrl ? <img src={att.signatureUrl} alt="서명" className="h-full object-contain" /> : <span className="text-sm text-gray-400 font-bold whitespace-nowrap"><i className="fas fa-file-signature mr-1"></i>터치하여 서명</span>}
+                                            </div>
+                                            {/* Delete Button Added Here */}
+                                            <button onClick={() => removeAttendee(idx)} className="w-8 h-8 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition" title="참석자 삭제">
+                                                <i className="fas fa-minus-circle"></i>
+                                            </button>
+                                        </div>
+                                    ))}
+                                    <button onClick={addAttendee} className="w-full py-2 bg-indigo-50 text-indigo-600 font-bold rounded text-sm hover:bg-indigo-100">+ 추가</button>
+                                </div>
+                                <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">6. TBM 활동 사진 첨부</h3>
+                                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-50 transition relative">
+                                    <input type="file" accept="image/*" onChange={handlePhotoUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                                    {form.photoUrl ? (
+                                        <img src={form.photoUrl} alt="Preview" className="max-h-32 mx-auto rounded shadow" />
+                                    ) : (
+                                        <div className="text-gray-400"><i className="fas fa-camera text-3xl mb-2"></i><br/>클릭하여 사진 촬영/업로드</div>
+                                    )}
+                                </div>
+                            </div>
+                        </section>
+                        <div className="pt-6 border-t flex justify-end gap-4">
+                            <button onClick={()=>setView('list')} className="px-6 py-3 border rounded">취소</button>
+                            <button onClick={handleSubmit} className="px-8 py-3 bg-indigo-600 text-white rounded font-bold shadow-lg hover:bg-indigo-700">저장</button>
+                        </div>
+                    </div>
+                    <SignatureModal isOpen={showSignModal} onClose={()=>setShowSignModal(false)} onSave={handleSaveSignature} signerName={currentSignerIndex!==null?form.attendees[currentSignerIndex].name:''} />
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [user, setUser] = useState(null); 
+            const [view, setView] = useState('login'); 
+            const [loading, setLoading] = useState(true);
+            const [toast, setToast] = useState(null);
+            const [tbms, setTbms] = useState([]);
+            const [accounts, setAccounts] = useState([]);
+            const [currentYear, setCurrentYear] = useState('2026'); // Default 2026
+            const [availableYears, setAvailableYears] = useState(['2026']); // Default Only 2026
+            const [loginId, setLoginId] = useState('');
+            const [loginPw, setLoginPw] = useState('');
+            const [saveId, setSaveId] = useState(false);
+            const [editTbmData, setEditTbmData] = useState(null);
+            
+            // PDF Generation State
+            const [downloadingPdf, setDownloadingPdf] = useState(false);
+            const [targetPdfTbm, setTargetPdfTbm] = useState(null);
+
+            useEffect(() => {
+                const saved = localStorage.getItem('savedId');
+                if (saved) { setLoginId(saved); setSaveId(true); }
+
+                const init = async () => {
+                    await signInAnonymously(auth);
+                    
+                    // Fetch System Config
+                    const configDoc = await getDoc(doc(db, "system_settings", "config"));
+                    if (configDoc.exists()) {
+                        setAvailableYears(configDoc.data().years || ['2026']);
+                    }
+
+                    // --- Sort Logic Applied Here (Global) ---
+                    onSnapshot(query(collection(db, "app_users")), (s) => {
+                        const fetchedAccounts = s.docs.map(d => ({id:d.id, ...d.data()}));
+                        // Sort by department alphabetically using localeCompare for Korean support
+                        fetchedAccounts.sort((a, b) => {
+                            const deptA = a.department || '';
+                            const deptB = b.department || '';
+                            return deptA.localeCompare(deptB, 'ko');
+                        });
+                        setAccounts(fetchedAccounts);
+                    });
+
+                    onSnapshot(query(collection(db, "global_tbm_data"), orderBy("createdAt", "desc")), (s) => {
+                        setTbms(s.docs.map(d => ({id:d.id, ...d.data()})));
+                        setLoading(false);
+                    });
+                };
+                init();
+            }, []);
+
+            const showToast = (msg, type = 'info') => setToast({ message: msg, type });
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                setLoading(true);
+                if (saveId) localStorage.setItem('savedId', loginId);
+                else localStorage.removeItem('savedId');
+
+                // Master Check (Updated Password)
+                if (loginId === 'admin' && loginPw === '0908') {
+                    const realMaster = accounts.find(a => a.role === 'master');
+                    if (!realMaster || accounts.length === 0) {
+                        setUser({ id: 'temp_master', username: 'Master Admin', role: 'master', department: '경영기획팀' });
+                        setView('dashboard');
+                        showToast('관리자로 로그인했습니다.', 'success');
+                        setLoading(false);
+                        return;
+                    }
+                }
+                const foundUser = accounts.find(a => a.username === loginId && a.password === loginPw);
+                if (foundUser) {
+                    setUser(foundUser);
+                    setView('dashboard');
+                    showToast('로그인 성공', 'success');
+                } else {
+                    showToast('정보 불일치', 'error');
+                }
+                setLoading(false);
+            };
+
+            const handleEditTbm = (tbm) => {
+                setEditTbmData(tbm);
+                setView('write');
+            };
+
+            const handleDeleteTbm = async (id) => {
+                if(confirm("정말 삭제하시겠습니까?")) {
+                    await deleteDoc(doc(db, "global_tbm_data", id));
+                    showToast("삭제 완료", "success");
+                }
+            };
+            
+            const handlePdfDownload = (tbm) => {
+                showToast("PDF 생성을 시작합니다...", "info");
+                setTargetPdfTbm(tbm);
+                setDownloadingPdf(true);
+            };
+
+            const handlePdfComplete = () => {
+                setDownloadingPdf(false);
+                setTargetPdfTbm(null);
+                showToast("PDF 다운로드가 완료되었습니다.", "success");
+            };
+
+            const handleLogout = () => { setUser(null); setView('login'); setLoginId(''); setLoginPw(''); };
+
+            const myTbms = useMemo(() => {
+                if (!user) return [];
+                const filtered = tbms.filter(t => t.date.startsWith(currentYear));
+                if (user.role === 'master') return filtered;
+                return filtered.filter(t => t.department === user.department);
+            }, [tbms, user, currentYear]);
+
+            const stats = useMemo(() => {
+                const yearTbms = tbms.filter(t => t.date.startsWith(currentYear));
+                const total = yearTbms.length;
+                const safeCount = yearTbms.filter(t => t.riskAssessmentDone).length;
+                const monthlyData = Array.from({length: 12}, (_, i) => ({ label: `${i+1}월`, value: 0 }));
+                yearTbms.forEach(t => {
+                    if(t.date) monthlyData[new Date(t.date).getMonth()].value++;
+                });
+                return { total, safeCount, monthlyData: monthlyData }; // REMOVED SLICE
+            }, [tbms, currentYear]);
+
+            if (loading && !user && view !== 'login') return <div className="h-screen flex items-center justify-center flex-col"><i className="fas fa-circle-notch fa-spin text-4xl text-indigo-600 mb-4"></i><p>Loading...</p></div>;
+
+            return (
+                <div className="flex h-screen overflow-hidden">
+                    {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+                    
+                    {/* Hidden PDF Generator */}
+                    {downloadingPdf && targetPdfTbm && (
+                        <PdfHiddenGenerator tbm={targetPdfTbm} onComplete={handlePdfComplete} />
+                    )}
+
+                    {view === 'login' ? (
+                        <div className="w-full"><LoginView loginId={loginId} setLoginId={setLoginId} loginPw={loginPw} setLoginPw={setLoginPw} handleLogin={handleLogin} saveId={saveId} setSaveId={setSaveId} loading={loading} /></div>
+                    ) : (
+                        <>
+                            <Sidebar user={user} view={view} setView={(v) => { if(v==='write') setEditTbmData(null); setView(v); }} handleLogout={handleLogout} />
+                            <main className="flex-1 ml-64 p-8 overflow-y-auto h-screen bg-gray-50">
+                                {view === 'dashboard' && <DashboardView stats={stats} tbms={tbms} currentYear={currentYear} setCurrentYear={setCurrentYear} allTbms={tbms} availableYears={availableYears} />}
+                                {view === 'list' && (
+                                    <ListView 
+                                        user={user} 
+                                        myTbms={myTbms} 
+                                        setView={(v) => { if(v==='write') setEditTbmData(null); setView(v); }} 
+                                        accounts={accounts} 
+                                        allTbms={tbms} 
+                                        currentYear={currentYear} 
+                                        setCurrentYear={setCurrentYear} 
+                                        onEdit={handleEditTbm} 
+                                        onDelete={handleDeleteTbm} 
+                                        onPdfDownload={handlePdfDownload}
+                                        availableYears={availableYears}
+                                    />
+                                )}
+                                {view === 'write' && <TBMFormView user={user} setView={setView} showToast={showToast} setLoading={setLoading} initialData={editTbmData} />}
+                                {view === 'admin' && <AdminView accounts={accounts} showToast={showToast} />}
+                                {view === 'settings' && <SettingsView availableYears={availableYears} setAvailableYears={setAvailableYears} />}
+                            </main>
+                        </>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<ErrorBoundary><App /></ErrorBoundary>);
+        
+        // Dynamic Style for animation
+        const styleSheet = document.createElement("style");
+        styleSheet.innerText = `
+            .input-field { width: 100%; border: 1px solid #d1d5db; border-radius: 0.375rem; padding: 0.5rem 0.75rem; outline: none; transition: border-color 0.2s; }
+            .input-field:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2); }
+            .label-text { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.25rem; }
+            @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+            .animate-fade-in-up { animation: fadeInUp 0.5s ease-out forwards; }
+            @keyframes bounceIn { 0% { transform: scale(0.9); opacity: 0; } 70% { transform: scale(1.05); } 100% { transform: scale(1); opacity: 1; } }
+            .animate-bounce-in { animation: bounceIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        `;
+        document.head.appendChild(styleSheet);
+    </script>
+</body>
+</html>

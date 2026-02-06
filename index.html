@@ -106,28 +106,23 @@
 
         // FIXED: ISO 8601 compliant week date range calculator
         const getWeekDetails = (year, weekNo) => {
-            // ISO Week 1 is the week with the first Thursday of the year (Jan 4th is always in Week 1)
             const jan4 = new Date(year, 0, 4);
             const day = jan4.getDay() || 7; // Mon=1, Sun=7
             const week1Start = new Date(jan4);
             week1Start.setDate(jan4.getDate() - day + 1); // Start of ISO Week 1 (Monday)
 
-            // Calculate start date of the requested week
             const start = new Date(week1Start);
             start.setDate(week1Start.getDate() + (weekNo - 1) * 7);
             
             const end = new Date(start);
             end.setDate(start.getDate() + 6);
             
-            // Format dates
             const fmt = (date) => `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
             
-            // Determine month for label (based on Thursday of the week to handle month overlap)
             const thursday = new Date(start);
             thursday.setDate(start.getDate() + 3);
             const month = thursday.getMonth() + 1;
             
-            // Simple visual "Week of Month" for the label
             const weekOfMonth = Math.ceil(start.getDate() / 7);
 
             return {
@@ -218,13 +213,12 @@
 
         const DonutChart = ({ data }) => {
             const total = data.reduce((acc,cur) => acc + cur.value, 0); 
-            const renderTotal = total || 1; // Prevent division by zero only for scale calculation
+            const renderTotal = total || 1; 
             const colors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b'];
             
             return (
                 <div className="flex flex-col items-center justify-center pt-2">
                     <div className="relative w-40 h-40 rounded-full border-8 border-gray-100 flex items-center justify-center">
-                        {/* Only show color if there is actual data */}
                         {total > 0 && (
                             <div className="absolute inset-0 rounded-full opacity-20 bg-[conic-gradient(at_center,_var(--tw-gradient-stops))] from-indigo-500 via-purple-500 to-pink-500"></div>
                         )}
@@ -551,7 +545,7 @@
             );
         };
 
-        // --- Weekly Status Panel (Updated Logic: Sort Alphabetically) ---
+        // --- Weekly Status Panel ---
         const WeeklyStatusPanel = ({ accounts, tbms, currentYear }) => {
             const [selectedWeek, setSelectedWeek] = useState(`${currentYear}-W${getWeekNumber(new Date())}`);
             
@@ -577,11 +571,10 @@
             };
 
             const statusData = useMemo(() => {
-                // Filter masters and Sort alphabetically (Ga-Na-Da)
                 const deptList = accounts
                     .filter(a => a.role !== 'master')
                     .map(a => a.department)
-                    .sort((a, b) => a.localeCompare(b, 'ko')); // Added sorting here for explicit order
+                    .sort((a, b) => a.localeCompare(b, 'ko'));
                 
                 const selectedWeekNum = parseInt(selectedWeek.split('-W')[1]);
                 
@@ -741,9 +734,6 @@
                 return Object.entries(risks).map(([label, value]) => ({label, value}));
             }, [tbms]);
 
-            // NOTE: deptRankingData Removed as per request
-
-            // New: Calculate Safety Score based on Risk Assessment Rate
             const safetyScore = useMemo(() => {
                 if (stats.total === 0) return 0;
                 return Math.round((stats.safeCount / stats.total) * 100);
@@ -887,7 +877,6 @@
                 setEditingId(null);
             };
 
-            // Explicit sort for rendering
             const sortedAccounts = [...accounts].sort((a, b) => (a.department || '').localeCompare(b.department || '', 'ko'));
 
             return (
@@ -932,7 +921,6 @@
         const TBMFormView = ({ user, setView, showToast, setLoading, initialData }) => {
             const [form, setForm] = useState(initialData || {
                 date: new Date().toISOString().split('T')[0],
-                // Updated default times
                 startTime: '09:00',
                 endTime: '18:00',
                 temperature: '',
@@ -946,7 +934,6 @@
                 leader: user.username,
                 preChecks: { check1: false, check2: false, check3: false },
                 safetyActionChecks: [{ risk: '', result: 'yes', action: '' }],
-                // New Fields
                 dailyCheckResult: '특이사항 없음',
                 photoUrl: '',
                 attendees: [{ name: '', signed: false, signatureUrl: '' }]
@@ -959,7 +946,6 @@
             const removeRisk = (id) => setForm(p => ({...p, risks: p.risks.filter(r => r.id !== id)}));
             const addAttendee = () => setForm(p => ({...p, attendees: [...p.attendees, { name: '', signed: false, signatureUrl: '' }]}));
             
-            // New: Remove Attendee Function
             const removeAttendee = (idx) => {
                 const newAtt = form.attendees.filter((_, i) => i !== idx);
                 setForm({ ...form, attendees: newAtt });
@@ -982,7 +968,6 @@
                 setForm({ ...form, attendees: newAtt });
             };
             
-            // New: Safety Action Methods
             const syncRisksToActions = () => {
                 const newActions = form.risks.filter(r => r.factor.trim() !== '').map(r => ({
                     risk: r.factor,
@@ -999,7 +984,6 @@
                 setForm({...form, safetyActionChecks: newChecks});
             };
 
-            // Photo Upload
             const handlePhotoUpload = (e) => {
                 const file = e.target.files[0];
                 if (file) {
@@ -1008,6 +992,61 @@
                         setForm(prev => ({...prev, photoUrl: reader.result}));
                     };
                     reader.readAsDataURL(file);
+                }
+            };
+
+            // --- NEW FUNCTION: Load Last Data ---
+            const handleLoadRecentData = async () => {
+                setLoading(true);
+                try {
+                    // 1. Query only by department to avoid composite index requirement
+                    const q = query(collection(db, "global_tbm_data"), where("department", "==", user.department));
+                    const snapshot = await getDocs(q);
+                    
+                    if (snapshot.empty) {
+                        showToast("불러올 이전 기록이 없습니다.", "info");
+                        setLoading(false);
+                        return;
+                    }
+
+                    // 2. Sort client-side (Descending by date/createdAt)
+                    const sortedDocs = snapshot.docs.map(d => d.data()).sort((a, b) => {
+                        const dateA = new Date(a.createdAt || a.date);
+                        const dateB = new Date(b.createdAt || b.date);
+                        return dateB - dateA;
+                    });
+                    
+                    const recentData = sortedDocs[0]; // Get the most recent one
+
+                    // 3. Merge Data (Keep Date/Time, Overwrite Content)
+                    setForm(prev => ({
+                        ...prev,
+                        workName: recentData.workName || '',
+                        workDesc: recentData.workDesc || '',
+                        location: recentData.location || '',
+                        // Reset Env info as it changes daily
+                        temperature: '', 
+                        humidity: '',
+                        // Copy Risks (Deep copy to avoid ref issues)
+                        risks: recentData.risks ? JSON.parse(JSON.stringify(recentData.risks)) : [],
+                        keyRiskId: recentData.keyRiskId || '', 
+                        // Copy Safety Checks (Reset results to 'yes')
+                        safetyActionChecks: recentData.safetyActionChecks ? recentData.safetyActionChecks.map(c => ({ risk: c.risk, result: 'yes', action: '' })) : [],
+                        // Copy Attendees (Names ONLY, clear signatures)
+                        attendees: recentData.attendees ? recentData.attendees.map(a => ({ name: a.name, signed: false, signatureUrl: '' })) : [],
+                        // Reset Daily Check
+                        dailyCheckResult: '특이사항 없음',
+                        // Reset Photo
+                        photoUrl: ''
+                    }));
+
+                    showToast("최근 작업 내용을 불러왔습니다.", "success");
+
+                } catch (error) {
+                    console.error("Load Data Error:", error);
+                    showToast("데이터 불러오기 중 오류가 발생했습니다.", "error");
+                } finally {
+                    setLoading(false);
                 }
             };
 
@@ -1040,7 +1079,19 @@
             return (
                 <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden max-w-4xl mx-auto animate-fade-in-up">
                     <div className="bg-gray-800 text-white p-4 flex justify-between items-center">
-                        <h2 className="text-xl font-bold"><i className="fas fa-edit mr-2"></i>{initialData ? "TBM 수정" : "TBM 등록"}</h2>
+                        <div className="flex items-center gap-4">
+                            <h2 className="text-xl font-bold"><i className="fas fa-edit mr-2"></i>{initialData ? "TBM 수정" : "TBM 등록"}</h2>
+                            {/* NEW BUTTON: Load Recent Data (Only visible in Create mode) */}
+                            {!initialData && (
+                                <button 
+                                    onClick={handleLoadRecentData}
+                                    className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded-full font-bold transition flex items-center shadow-md border border-indigo-400"
+                                    title="가장 최근에 작성한 TBM 내용 불러오기"
+                                >
+                                    <i className="fas fa-history mr-1"></i>최근 데이터 불러오기
+                                </button>
+                            )}
+                        </div>
                         <span className="text-sm bg-gray-700 px-3 py-1 rounded">{user.department}</span>
                     </div>
                     <div className="p-8 space-y-8">
@@ -1147,7 +1198,6 @@
                                             <div onClick={()=>!att.signed && openSignModal(idx)} className={`flex-1 h-12 border rounded flex items-center justify-center cursor-pointer transition ${att.signed ? 'bg-white border-indigo-500' : 'bg-gray-50 border-dashed hover:bg-indigo-50'}`}>
                                                 {att.signed && att.signatureUrl ? <img src={att.signatureUrl} alt="서명" className="h-full object-contain" /> : <span className="text-sm text-gray-400 font-bold whitespace-nowrap"><i className="fas fa-file-signature mr-1"></i>터치하여 서명</span>}
                                             </div>
-                                            {/* Delete Button Added Here */}
                                             <button onClick={() => removeAttendee(idx)} className="w-8 h-8 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition" title="참석자 삭제">
                                                 <i className="fas fa-minus-circle"></i>
                                             </button>

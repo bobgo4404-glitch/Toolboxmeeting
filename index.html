@@ -588,6 +588,20 @@
                                     <td className="border border-black pl-2 align-middle text-center" style={{verticalAlign: 'middle'}}>{tbm.riskAssessmentDone ? '☑ 예' : '☐ 아니오'}</td>
                                 </tr>
                                 <tr className="h-10">
+                                    <th className="pdf-header-cell border border-black bg-gray-100 text-center align-middle font-bold text-xs" style={{verticalAlign: 'middle'}}>
+                                        <span className="pdf-header-text">작업 전 공유/교육<br/>실시여부</span>
+                                    </th>
+                                    <td className="border border-black pl-2 align-middle text-center" style={{verticalAlign: 'middle'}}>
+                                        {tbm.preJobBriefingDone === true ? '☑ 예' : tbm.preJobBriefingDone === false ? '☐ 아니오' : '-'}
+                                    </td>
+                                    <th className="pdf-header-cell border border-black bg-gray-100 text-center align-middle font-bold text-xs" style={{verticalAlign: 'middle'}}>
+                                        <span className="pdf-header-text">미실시 사유+즉시조치</span>
+                                    </th>
+                                    <td className="border border-black pl-2 align-middle whitespace-pre-wrap" style={{verticalAlign: 'middle'}}>
+                                        {tbm.preJobBriefingDone === false ? (tbm.preJobBriefingAction || '-') : '-'}
+                                    </td>
+                                </tr>
+                                <tr className="h-10">
                                     <th className="border border-black bg-gray-100 text-center align-middle font-bold" style={{verticalAlign: 'middle'}}>현장 환경</th>
                                     <td colSpan="3" className="border border-black pl-2 align-middle" style={{verticalAlign: 'middle'}}>
                                         <span className="mr-6"><strong>온도:</strong> {tbm.temperature || '-'}℃</span>
@@ -876,7 +890,7 @@
                     <form onSubmit={handleLogin} className="space-y-6">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">아이디 (부서코드)</label>
-                            <input type="text" className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 transition outline-none" placeholder="admin or dept_id" value={loginId} onChange={e => setLoginId(e.target.value)} required />
+                            <input type="text" className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 transition outline-none" placeholder="아이디를 입력하세요" value={loginId} onChange={e => setLoginId(e.target.value)} required />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">비밀번호</label>
@@ -1233,6 +1247,8 @@
                 leader: user.username,
                 preChecks: { check1: false, check2: false, check3: false },
                 safetyActionChecks: [],
+                preJobBriefingDone: true,
+                preJobBriefingAction: '',
                 dailyCheckResult: '특이사항 없음',
                 photoUrl: '',
                 attendees: [{ name: user.username || '', signed: false, signatureUrl: '', isLeader: true }]
@@ -1261,6 +1277,8 @@
             const locationRef = useRef(null);
             const leaderNameRef = useRef(null);
             const leaderSignatureRef = useRef(null);
+            const briefingDoneRef = useRef(null);
+            const briefingActionRef = useRef(null);
             const draftKey = `tbm_draft_${user.department}`;
 
             useEffect(() => {
@@ -1443,6 +1461,8 @@
                         } : {}),
                         ...(copyOptions.checks ? {
                             preChecks: prev.preChecks || { check1: false, check2: false, check3: false },
+                            preJobBriefingDone: prev.preJobBriefingDone ?? true,
+                            preJobBriefingAction: prev.preJobBriefingAction || '',
                             dailyCheckResult: prev.dailyCheckResult || '특이사항 없음'
                         } : {}),
                         ...(copyOptions.attendees ? {
@@ -1514,7 +1534,9 @@
                     workName: workNameRef,
                     location: locationRef,
                     leaderName: leaderNameRef,
-                    leaderSignature: leaderSignatureRef
+                    leaderSignature: leaderSignatureRef,
+                    briefingDone: briefingDoneRef,
+                    briefingAction: briefingActionRef
                 };
                 const target = map[key]?.current;
                 if (!target) return;
@@ -1526,13 +1548,16 @@
                 const nextErrors = [];
                 if (!form.workName?.trim()) nextErrors.push({ key: 'workName', label: '작업명' });
                 if (!form.location?.trim()) nextErrors.push({ key: 'location', label: '장소' });
+                if (form.preJobBriefingDone === false && !String(form.preJobBriefingAction || '').trim()) {
+                    nextErrors.push({ key: 'briefingAction', label: '작업 전 공유/교육 미실시 사유+즉시조치' });
+                }
                 const leader = (form.attendees || []).find(att => att.isLeader);
                 if (!leader || !leader.name?.trim()) nextErrors.push({ key: 'leaderName', label: '리더 이름' });
                 if (!leader?.signatureUrl) nextErrors.push({ key: 'leaderSignature', label: '리더 서명' });
 
                 if (nextErrors.length) {
                     setValidationErrors(nextErrors);
-                    setSectionOpen((prev) => ({ ...prev, overview: true, attendees: true }));
+                    setSectionOpen((prev) => ({ ...prev, overview: true, checks: true, attendees: true }));
                     showToast(`필수 입력 누락: ${nextErrors.map((e) => e.label).join(', ')}`, "info");
                     scrollToErrorField(nextErrors[0].key);
                     return;
@@ -1728,6 +1753,42 @@
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border border-gray-100 rounded-lg p-4">
                                     <div>
                                         <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">작업 전 안전 점검 (Checklist)</h3>
+                                        <div ref={briefingDoneRef} className="mb-4 p-3 border rounded bg-blue-50 border-blue-200">
+                                            <div className="text-sm font-bold text-blue-900 mb-2">작업 전 공유/교육 실시 여부</div>
+                                            <div className="flex items-center gap-4">
+                                                <label className="flex items-center gap-1 text-sm">
+                                                    <input
+                                                        type="radio"
+                                                        name="preJobBriefingDone"
+                                                        checked={form.preJobBriefingDone === true}
+                                                        onChange={() => setForm({ ...form, preJobBriefingDone: true, preJobBriefingAction: '' })}
+                                                    />
+                                                    예
+                                                </label>
+                                                <label className="flex items-center gap-1 text-sm">
+                                                    <input
+                                                        type="radio"
+                                                        name="preJobBriefingDone"
+                                                        checked={form.preJobBriefingDone === false}
+                                                        onChange={() => setForm({ ...form, preJobBriefingDone: false })}
+                                                    />
+                                                    아니오
+                                                </label>
+                                            </div>
+                                            {form.preJobBriefingDone === false && (
+                                                <div className="mt-2">
+                                                    <label className="label-text text-red-600">미실시 사유 + 즉시조치 (필수)</label>
+                                                    <input
+                                                        ref={briefingActionRef}
+                                                        type="text"
+                                                        className="input-field"
+                                                        placeholder="예: 인원 미집결로 즉시 재소집 후 공유 완료"
+                                                        value={form.preJobBriefingAction || ''}
+                                                        onChange={(e) => setForm({ ...form, preJobBriefingAction: e.target.value })}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
                                         <div className="space-y-2 mb-6">
                                             <label className="flex items-center p-2 border rounded bg-white"><input type="checkbox" className="mr-2" checked={form.preChecks.check1} onChange={e=>setForm({...form, preChecks:{...form.preChecks, check1:e.target.checked}})} />보호구 착용</label>
                                             <label className="flex items-center p-2 border rounded bg-white"><input type="checkbox" className="mr-2" checked={form.preChecks.check2} onChange={e=>setForm({...form, preChecks:{...form.preChecks, check2:e.target.checked}})} />장비 점검</label>

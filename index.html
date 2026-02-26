@@ -238,7 +238,7 @@
             }, []);
             const bgClass = type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600';
             return (
-                <div className={`fixed top-5 right-5 ${bgClass} text-white px-6 py-3 rounded-lg shadow-xl z-50 flex items-center animate-bounce-in z-50`}>
+                <div className={`fixed top-4 left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-5 ${bgClass} text-white px-4 sm:px-6 py-3 rounded-lg shadow-xl z-50 flex items-center animate-bounce-in max-w-[calc(100vw-1.5rem)]`}>
                     <i className={`fas ${type === 'success' ? 'fa-check-circle' : 'fa-info-circle'} mr-3`}></i>
                     {message}
                 </div>
@@ -347,6 +347,9 @@
         const SignatureModal = ({ isOpen, onClose, onSave, signerName }) => {
             const canvasRef = useRef(null);
             const isDrawing = useRef(false);
+            const pointsRef = useRef([]);
+            const MIN_MOVE_DISTANCE = 2.6;
+            const STROKE_SMOOTHING = 0.42;
             const [hasSigned, setHasSigned] = useState(false);
 
             useEffect(() => {
@@ -356,6 +359,7 @@
                     ctx.lineWidth = 3;
                     ctx.lineCap = 'round';
                     ctx.strokeStyle = 'black';
+                    ctx.lineJoin = 'round';
                     
                     setTimeout(() => {
                         const rect = canvas.getBoundingClientRect();
@@ -364,6 +368,7 @@
                         ctx.clearRect(0, 0, canvas.width, canvas.height);
                     }, 50);
                     
+                    pointsRef.current = [];
                     setHasSigned(false);
                 }
             }, [isOpen]);
@@ -383,26 +388,73 @@
                 };
             };
 
+            const distance = (a, b) => {
+                const dx = a.x - b.x;
+                const dy = a.y - b.y;
+                return Math.sqrt(dx * dx + dy * dy);
+            };
+
+            const midPoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
             const startDrawing = (e) => {
+                e.preventDefault();
                 isDrawing.current = true;
                 const { x, y } = getPos(e);
+                pointsRef.current = [{ x, y }];
                 const ctx = canvasRef.current.getContext('2d');
+
+                // tap 입력도 보이도록 시작점 표시
                 ctx.beginPath();
-                ctx.moveTo(x, y);
+                ctx.arc(x, y, ctx.lineWidth * 0.45, 0, Math.PI * 2);
+                ctx.fillStyle = ctx.strokeStyle;
+                ctx.fill();
+                setHasSigned(true);
             };
 
             const draw = (e) => {
                 if (!isDrawing.current) return;
                 e.preventDefault();
+
                 const { x, y } = getPos(e);
                 const ctx = canvasRef.current.getContext('2d');
-                ctx.lineTo(x, y);
+                const prev = pointsRef.current[pointsRef.current.length - 1];
+
+                let current = { x, y };
+                if (prev) {
+                    current = {
+                        x: prev.x + (x - prev.x) * STROKE_SMOOTHING,
+                        y: prev.y + (y - prev.y) * STROKE_SMOOTHING,
+                    };
+                }
+
+                if (prev && distance(prev, current) < MIN_MOVE_DISTANCE) return;
+
+                pointsRef.current.push(current);
+
+                if (pointsRef.current.length < 3) {
+                    ctx.beginPath();
+                    ctx.moveTo(prev.x, prev.y);
+                    ctx.lineTo(current.x, current.y);
+                    ctx.stroke();
+                    return;
+                }
+
+                const p0 = pointsRef.current[pointsRef.current.length - 3];
+                const p1 = pointsRef.current[pointsRef.current.length - 2];
+                const p2 = pointsRef.current[pointsRef.current.length - 1];
+                const m1 = midPoint(p0, p1);
+                const m2 = midPoint(p1, p2);
+
+                ctx.beginPath();
+                ctx.moveTo(m1.x, m1.y);
+                ctx.quadraticCurveTo(p1.x, p1.y, m2.x, m2.y);
                 ctx.stroke();
                 setHasSigned(true);
             };
 
             const stopDrawing = () => {
                 isDrawing.current = false;
+                pointsRef.current = [];
             };
 
             const handleSave = () => {
@@ -416,6 +468,7 @@
                 const canvas = canvasRef.current;
                 const ctx = canvas.getContext('2d');
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
+                pointsRef.current = [];
                 setHasSigned(false);
             };
 
@@ -839,8 +892,8 @@
             </div>
         );
 
-        const Sidebar = ({ user, view, setView, handleLogout }) => (
-            <div className="w-64 bg-white/90 backdrop-blur-xl text-slate-700 h-screen fixed left-0 top-0 flex flex-col border-r border-blue-100 shadow-[0_8px_24px_rgba(15,23,42,0.08)] z-20">
+        const Sidebar = ({ user, view, setView, handleLogout, mobileMenuOpen, setMobileMenuOpen }) => (
+            <div className={`w-64 bg-white/95 backdrop-blur-xl text-slate-700 h-[100dvh] fixed left-0 top-0 flex flex-col border-r border-blue-100 shadow-[0_8px_24px_rgba(15,23,42,0.08)] z-40 transform transition-transform duration-300 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
                 <div className="p-6 border-b border-blue-100">
                     <h1 className="text-xl font-bold tracking-wider text-blue-700"><i className="fas fa-hard-hat mr-2"></i>Smart TBM</h1>
                     <p className="text-xs text-slate-400 mt-1">Enterprise EHS System</p>
@@ -855,19 +908,19 @@
                     </div>
                 </div>
                 <nav className="flex-1 p-4 space-y-2 mt-2">
-                    <button onClick={() => setView('dashboard')} className={`w-full text-left p-3 rounded-xl flex items-center transition ${view === 'dashboard' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-blue-50 hover:text-blue-700'}`}><i className="fas fa-chart-pie w-6"></i> 대시보드</button>
-                    <button onClick={() => setView('write')} className={`w-full text-left p-3 rounded-xl flex items-center transition ${view === 'write' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-blue-50 hover:text-blue-700'}`}><i className="fas fa-edit w-6"></i> TBM 등록</button>
-                    <button onClick={() => setView('list')} className={`w-full text-left p-3 rounded-xl flex items-center transition ${view === 'list' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-blue-50 hover:text-blue-700'}`}><i className="fas fa-list-alt w-6"></i> TBM 이력조회</button>
+                    <button onClick={() => { setView('dashboard'); setMobileMenuOpen(false); }} className={`w-full text-left p-3 rounded-xl flex items-center transition ${view === 'dashboard' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-blue-50 hover:text-blue-700'}`}><i className="fas fa-chart-pie w-6"></i> 대시보드</button>
+                    <button onClick={() => { setView('write'); setMobileMenuOpen(false); }} className={`w-full text-left p-3 rounded-xl flex items-center transition ${view === 'write' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-blue-50 hover:text-blue-700'}`}><i className="fas fa-edit w-6"></i> TBM 등록</button>
+                    <button onClick={() => { setView('list'); setMobileMenuOpen(false); }} className={`w-full text-left p-3 rounded-xl flex items-center transition ${view === 'list' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-blue-50 hover:text-blue-700'}`}><i className="fas fa-list-alt w-6"></i> TBM 이력조회</button>
                     {user.role === 'master' && (
                         <>
                             <div className="my-4 border-t border-blue-100"></div>
-                            <button onClick={() => setView('admin')} className={`w-full text-left p-3 rounded-xl flex items-center transition ${view === 'admin' ? 'bg-pink-600 text-white shadow-md' : 'text-pink-500 hover:bg-pink-50 hover:text-pink-700'}`}><i className="fas fa-users-cog w-6"></i> 계정/권한 관리</button>
-                            <button onClick={() => setView('settings')} className={`w-full text-left p-3 rounded-xl flex items-center transition ${view === 'settings' ? 'bg-slate-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'}`}><i className="fas fa-cog w-6"></i> 시스템 설정</button>
+                            <button onClick={() => { setView('admin'); setMobileMenuOpen(false); }} className={`w-full text-left p-3 rounded-xl flex items-center transition ${view === 'admin' ? 'bg-pink-600 text-white shadow-md' : 'text-pink-500 hover:bg-pink-50 hover:text-pink-700'}`}><i className="fas fa-users-cog w-6"></i> 계정/권한 관리</button>
+                            <button onClick={() => { setView('settings'); setMobileMenuOpen(false); }} className={`w-full text-left p-3 rounded-xl flex items-center transition ${view === 'settings' ? 'bg-slate-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'}`}><i className="fas fa-cog w-6"></i> 시스템 설정</button>
                         </>
                     )}
                 </nav>
                 <div className="p-4 border-t border-blue-100">
-                    <button onClick={handleLogout} className="w-full py-2 px-4 border border-slate-300 rounded-xl text-slate-600 hover:bg-slate-100 transition flex items-center justify-center text-sm"><i className="fas fa-sign-out-alt mr-2"></i> 로그아웃</button>
+                    <button onClick={() => { setMobileMenuOpen(false); handleLogout(); }} className="w-full py-2 px-4 border border-slate-300 rounded-xl text-slate-600 hover:bg-slate-100 transition flex items-center justify-center text-sm"><i className="fas fa-sign-out-alt mr-2"></i> 로그아웃</button>
                 </div>
             </div>
         );
@@ -899,12 +952,12 @@
 
             return (
                 <div className="space-y-6 animate-fade-in-up">
-                    <div className="flex justify-between items-end">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3">
                         <div>
                             <h2 className="text-2xl font-bold text-gray-800">EHS 경영 대시보드</h2>
                             <p className="text-gray-500">실시간 안전 활동 현황 리포트</p>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                              <select className="bg-white border border-gray-300 text-gray-700 py-1 px-3 rounded-lg font-bold" value={currentYear} onChange={(e) => setCurrentYear(e.target.value)}>
                                 {availableYears.map(y => <option key={y} value={y}>{y}년</option>)}
                             </select>
@@ -960,16 +1013,16 @@
 
             return (
                 <div className="bg-white rounded-xl shadow border border-gray-200 animate-fade-in-up">
-                    <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                    <div className="p-4 sm:p-6 border-b border-gray-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
                         <div>
                             <h2 className="text-xl font-bold text-gray-800">TBM 이력 조회</h2>
                             <p className="text-sm text-gray-500">{user.role === 'master' ? '전사 통합 관리 모드' : `${user.department} 활동 내역`}</p>
                         </div>
-                        <div className="flex gap-2">
-                            <select className="bg-gray-50 border border-gray-300 text-gray-700 py-1 px-3 rounded shadow-sm" value={currentYear} onChange={(e) => setCurrentYear(e.target.value)}>
+                        <div className="flex w-full sm:w-auto gap-2">
+                            <select className="bg-gray-50 border border-gray-300 text-gray-700 py-1 px-3 rounded shadow-sm w-full sm:w-auto" value={currentYear} onChange={(e) => setCurrentYear(e.target.value)}>
                                 {availableYears.map(y => <option key={y} value={y}>{y}년</option>)}
                             </select>
-                            <button onClick={() => setView('write')} className="bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700 text-sm"><i className="fas fa-plus mr-1"></i> 신규 등록</button>
+                            <button onClick={() => setView('write')} className="bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700 text-sm whitespace-nowrap"><i className="fas fa-plus mr-1"></i> 신규 등록</button>
                         </div>
                     </div>
                     
@@ -993,7 +1046,7 @@
                         </div>
                     </div>
 
-                    <div className="overflow-x-auto">
+                    <div className="hidden md:block overflow-x-auto">
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="bg-gray-50 text-gray-500 text-sm uppercase tracking-wider">
@@ -1026,6 +1079,26 @@
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                    <div className="md:hidden p-4 space-y-3">
+                        {filteredTbms.length === 0 ? (
+                            <div className="p-4 text-center text-gray-400 border rounded-lg">{currentYear}년도 등록된 TBM 내역이 없습니다.</div>
+                        ) : filteredTbms.map(tbm => (
+                            <div key={tbm.id} className="border rounded-lg p-3 bg-white">
+                                <div className="text-sm font-bold text-gray-700">{getFormattedWeek(tbm.date)}</div>
+                                <div className="text-xs text-gray-400 mb-2">{tbm.date}</div>
+                                <div className="text-sm text-indigo-600 font-bold mb-1">{tbm.department}</div>
+                                <div className="text-sm font-medium text-gray-800 mb-1">{tbm.workName}</div>
+                                <div className="text-sm text-gray-600 mb-3">리더: {tbm.leader}</div>
+                                <div className="flex flex-wrap gap-2">
+                                    <button onClick={() => onEdit(tbm)} className="text-indigo-500 hover:bg-indigo-50 px-3 py-1.5 rounded text-xs border border-indigo-200"><i className="fas fa-edit mr-1"></i>수정</button>
+                                    <button onClick={() => onDelete(tbm.id)} className="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded text-xs border border-red-200"><i className="fas fa-trash mr-1"></i>삭제</button>
+                                    {user.role === 'master' && (
+                                        <button onClick={() => onPdfDownload(tbm)} className="text-green-600 hover:bg-green-50 px-3 py-1.5 rounded text-xs border border-green-200"><i className="fas fa-file-pdf mr-1"></i>PDF</button>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
             );
@@ -1170,6 +1243,16 @@
             const removeAttendee = (idx) => {
                 const newAtt = form.attendees.filter((_, i) => i !== idx);
                 setForm({ ...form, attendees: newAtt });
+
+                // 삭제 후 서명 대상 인덱스가 어긋나지 않도록 보정
+                if (currentSignerIndex !== null) {
+                    if (currentSignerIndex === idx) {
+                        setShowSignModal(false);
+                        setCurrentSignerIndex(null);
+                    } else if (currentSignerIndex > idx) {
+                        setCurrentSignerIndex(currentSignerIndex - 1);
+                    }
+                }
             };
 
             const updateAttendee = (idx, name) => {
@@ -1183,10 +1266,17 @@
                 setShowSignModal(true);
             };
             const handleSaveSignature = (dataUrl) => {
+                if (currentSignerIndex === null || !form.attendees[currentSignerIndex]) {
+                    showToast('서명 대상 참석자를 다시 선택해 주세요.', 'error');
+                    setShowSignModal(false);
+                    setCurrentSignerIndex(null);
+                    return;
+                }
                 const newAtt = [...form.attendees];
                 newAtt[currentSignerIndex].signed = true;
                 newAtt[currentSignerIndex].signatureUrl = dataUrl;
                 setForm({ ...form, attendees: newAtt });
+                setCurrentSignerIndex(null);
             };
             
             const buildSafetyActionChecksFromRisks = (risks) => {
@@ -1360,12 +1450,12 @@
                         <h2 className="text-xl font-bold"><i className="fas fa-edit mr-2"></i>{initialData ? "TBM 수정" : "TBM 등록"}</h2>
                         <span className="text-sm bg-gray-700 px-3 py-1 rounded">{user.department}</span>
                     </div>
-                    <div className="p-8 space-y-8">
+                    <div className="p-4 sm:p-6 md:p-8 space-y-8">
                         <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 relative">
                             <div className="text-xs text-indigo-900 whitespace-nowrap">
                                 필수 입력: <span className="font-bold">작업명·장소·리더서명</span>만 완료 후 저장 가능 (나머지는 필요 시 선택 입력)
                             </div>
-                            <div className="flex gap-1 whitespace-nowrap">
+                            <div className="flex flex-wrap gap-1">
                                 <button onClick={handleLoadPrevious} className="shrink-0 px-2.5 py-1.5 bg-white border border-blue-300 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-50">
                                     <i className="fas fa-copy mr-1"></i>전주복사
                                 </button>
@@ -1430,13 +1520,13 @@
                             </div>
                         </section>
 
-                        <section className="bg-yellow-50 p-6 rounded-lg border border-yellow-200">
-                             <div className="flex justify-between items-center mb-4">
+                        <section className="bg-yellow-50 p-4 sm:p-6 rounded-lg border border-yellow-200">
+                             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-4">
                                 <h3 className="text-lg font-bold text-yellow-800">2. 위험성 평가</h3>
                                 <div className="flex items-center gap-2"><span className="text-sm font-bold">실시여부</span><input type="checkbox" className="w-5 h-5" checked={form.riskAssessmentDone} onChange={e=>setForm({...form, riskAssessmentDone: e.target.checked})} /></div>
                             </div>
                             <div className="space-y-2">
-                                <div className="grid grid-cols-12 gap-2 text-xs font-bold text-gray-500 text-center mb-1">
+                                <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-bold text-gray-500 text-center mb-1">
                                     <div className="col-span-1">No</div>
                                     <div className="col-span-3">잠재위험요인</div>
                                     <div className="col-span-3">안전대책</div>
@@ -1445,20 +1535,28 @@
                                     <div className="col-span-1">삭제</div>
                                 </div>
                                 {form.risks.map((risk, idx) => (
-                                    <div key={risk.id} className="grid grid-cols-12 gap-2 items-center bg-white p-2 rounded border border-yellow-100">
-                                        <div className="col-span-1 text-center font-bold bg-white rounded-full w-6 h-6">{idx+1}</div>
-                                        <div className="col-span-3"><input type="text" className="input-field py-1 text-sm" placeholder="위험요인" value={risk.factor} onChange={e=>updateRisk(risk.id, 'factor', e.target.value)} /></div>
-                                        <div className="col-span-3"><input type="text" className="input-field py-1 text-sm" placeholder="대책" value={risk.measure} onChange={e=>updateRisk(risk.id, 'measure', e.target.value)} /></div>
-                                        <div className="col-span-2 text-center">
+                                    <div key={risk.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-white p-3 rounded border border-yellow-100">
+                                        <div className="md:col-span-1 text-center font-bold bg-gray-100 rounded-full w-7 h-7 leading-7 mx-auto md:mx-0">{idx+1}</div>
+                                        <div className="md:col-span-3">
+                                            <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">잠재위험요인</label>
+                                            <input type="text" className="input-field py-1 text-sm" placeholder="위험요인" value={risk.factor} onChange={e=>updateRisk(risk.id, 'factor', e.target.value)} />
+                                        </div>
+                                        <div className="md:col-span-3">
+                                            <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">안전대책</label>
+                                            <input type="text" className="input-field py-1 text-sm" placeholder="대책" value={risk.measure} onChange={e=>updateRisk(risk.id, 'measure', e.target.value)} />
+                                        </div>
+                                        <div className="md:col-span-2">
+                                            <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">조치여부</label>
                                             <select className="input-field py-1 text-xs" value={risk.result || 'yes'} onChange={e=>updateRisk(risk.id, 'result', e.target.value)}>
                                                 <option value="yes">예</option>
                                                 <option value="no">아니오</option>
                                             </select>
                                         </div>
-                                        <div className="col-span-2">
+                                        <div className="md:col-span-2">
+                                            <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">'아니오' 사유</label>
                                             <input type="text" className="input-field py-1 text-xs" placeholder="미조치 사유" value={risk.action || ''} onChange={e=>updateRisk(risk.id, 'action', e.target.value)} disabled={(risk.result || 'yes') === 'yes'} />
                                         </div>
-                                        <div className="col-span-1 text-center"><button onClick={()=>removeRisk(risk.id)} className="text-red-400"><i className="fas fa-times"></i></button></div>
+                                        <div className="md:col-span-1 text-center"><button onClick={()=>removeRisk(risk.id)} className="text-red-400 px-2 py-1 border rounded md:border-0"><i className="fas fa-times mr-1 md:mr-0"></i><span className="md:hidden">삭제</span></button></div>
                                     </div>
                                 ))}
                                 <button onClick={addRiskRow} className="w-full py-2 border-2 border-dashed border-gray-300 text-gray-500 rounded text-sm hover:bg-white">+ 위험요인 추가</button>
@@ -1488,7 +1586,7 @@
                                             <div className={`w-12 shrink-0 text-center px-1 py-1 rounded text-xs font-bold ${att.isLeader ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700'}`}>
                                                 {att.isLeader ? '리더' : '참석'}
                                             </div>
-                                            <input type="text" placeholder={att.isLeader ? "리더 이름" : "참석자 이름"} className="border border-gray-300 rounded px-3 py-2 text-sm w-24 md:w-32 shrink-0 text-center font-bold outline-none focus:ring-2 focus:ring-indigo-500 h-12" value={att.name} onChange={e=>updateAttendee(idx, e.target.value)} disabled={att.signed} />
+                                            <input type="text" placeholder={att.isLeader ? "리더 이름" : "참석자 이름"} className="border border-gray-300 rounded px-3 py-2 text-sm w-20 sm:w-28 md:w-32 shrink-0 text-center font-bold outline-none focus:ring-2 focus:ring-indigo-500 h-12" value={att.name} onChange={e=>updateAttendee(idx, e.target.value)} disabled={att.signed} />
                                             <div onClick={()=>!att.signed && openSignModal(idx)} className={`flex-1 min-w-0 h-12 border rounded flex items-center justify-center cursor-pointer transition ${att.signed ? 'bg-white border-indigo-500' : 'bg-gray-50 border-dashed hover:bg-indigo-50'}`}>
                                                 {att.signed && att.signatureUrl ? <img src={att.signatureUrl} alt="서명" className="h-full object-contain" /> : <span className="text-sm text-gray-400 font-bold whitespace-nowrap"><i className="fas fa-file-signature mr-1"></i>{att.isLeader ? '리더 서명(필수)' : '서명 생략 가능'}</span>}
                                             </div>
@@ -1512,14 +1610,22 @@
                                 </div>
                             </div>
                         </section>
-                        <div className="pt-6 border-t flex justify-end gap-4">
-                            <button onClick={()=>setView('list')} className="px-6 py-3 border rounded">취소</button>
-                            <button onClick={handleSubmit} disabled={submitting} className={`px-8 py-3 text-white rounded font-bold shadow-lg ${submitting ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+                        <div className="pt-6 border-t flex flex-col-reverse sm:flex-row justify-end gap-3 sm:gap-4">
+                            <button onClick={()=>setView('list')} className="w-full sm:w-auto px-6 py-3 border rounded">취소</button>
+                            <button onClick={handleSubmit} disabled={submitting} className={`w-full sm:w-auto px-8 py-3 text-white rounded font-bold shadow-lg ${submitting ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
                                 {submitting ? <><i className="fas fa-spinner fa-spin mr-2"></i>저장 중...</> : '저장'}
                             </button>
                         </div>
                     </div>
-                    <SignatureModal isOpen={showSignModal} onClose={()=>setShowSignModal(false)} onSave={handleSaveSignature} signerName={currentSignerIndex!==null?form.attendees[currentSignerIndex].name:''} />
+                    <SignatureModal
+                        isOpen={showSignModal}
+                        onClose={() => {
+                            setShowSignModal(false);
+                            setCurrentSignerIndex(null);
+                        }}
+                        onSave={handleSaveSignature}
+                        signerName={currentSignerIndex !== null ? (form.attendees[currentSignerIndex]?.name || '') : ''}
+                    />
                 </div>
             );
         };
@@ -1537,6 +1643,7 @@
             const [loginPw, setLoginPw] = useState('');
             const [saveId, setSaveId] = useState(false);
             const [editTbmData, setEditTbmData] = useState(null);
+            const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
             
             // PDF Generation State
             const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -1688,7 +1795,7 @@
                 showToast("PDF 다운로드가 완료되었습니다.", "success");
             };
 
-            const handleLogout = () => { setUser(null); setView('login'); setLoginId(''); setLoginPw(''); };
+            const handleLogout = () => { setUser(null); setView('login'); setLoginId(''); setLoginPw(''); setMobileMenuOpen(false); };
 
             const myTbms = useMemo(() => {
                 if (!user) return [];
@@ -1711,7 +1818,7 @@
             if (loading && !user && view !== 'login') return <div className="h-screen flex items-center justify-center flex-col"><i className="fas fa-circle-notch fa-spin text-4xl text-indigo-600 mb-4"></i><p>Loading...</p></div>;
 
             return (
-                <div className="flex h-screen overflow-hidden">
+                <div className="flex h-[100dvh] overflow-hidden">
                     {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
                     
                     {/* Hidden PDF Generator */}
@@ -1723,8 +1830,27 @@
                         <div className="w-full"><LoginView loginId={loginId} setLoginId={setLoginId} loginPw={loginPw} setLoginPw={setLoginPw} handleLogin={handleLogin} saveId={saveId} setSaveId={setSaveId} loading={loading} /></div>
                     ) : (
                         <>
-                            <Sidebar user={user} view={view} setView={(v) => { if(v==='write') setEditTbmData(null); setView(v); }} handleLogout={handleLogout} />
-                            <main className="flex-1 ml-64 p-8 overflow-y-auto h-screen app-main">
+                            <div className="md:hidden fixed top-0 left-0 right-0 z-30 h-14 bg-white/95 backdrop-blur border-b border-blue-100 px-3 flex items-center justify-between">
+                                <button onClick={() => setMobileMenuOpen(true)} className="w-9 h-9 rounded-lg border border-blue-200 text-blue-700">
+                                    <i className="fas fa-bars"></i>
+                                </button>
+                                <div className="font-bold text-blue-700 text-sm"><i className="fas fa-hard-hat mr-1"></i>Smart TBM</div>
+                                <button onClick={handleLogout} className="w-9 h-9 rounded-lg border border-slate-200 text-slate-500">
+                                    <i className="fas fa-sign-out-alt"></i>
+                                </button>
+                            </div>
+                            {mobileMenuOpen && (
+                                <div className="md:hidden fixed inset-0 bg-black/35 z-30" onClick={() => setMobileMenuOpen(false)}></div>
+                            )}
+                            <Sidebar
+                                user={user}
+                                view={view}
+                                setView={(v) => { if(v==='write') setEditTbmData(null); setView(v); }}
+                                handleLogout={handleLogout}
+                                mobileMenuOpen={mobileMenuOpen}
+                                setMobileMenuOpen={setMobileMenuOpen}
+                            />
+                            <main className="flex-1 md:ml-64 p-4 sm:p-6 md:p-8 overflow-y-auto h-[100dvh] pt-[4.5rem] md:pt-8 app-main">
                                 {view === 'dashboard' && <DashboardView stats={stats} tbms={tbms} currentYear={currentYear} setCurrentYear={setCurrentYear} allTbms={tbms} availableYears={availableYears} />}
                                 {view === 'list' && (
                                     <ListView 

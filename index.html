@@ -1001,15 +1001,47 @@
 
         const ListView = ({ user, myTbms, setView, accounts, allTbms, currentYear, setCurrentYear, onEdit, onDelete, onPdfDownload, availableYears }) => {
             const [searchKeyword, setSearchKeyword] = useState('');
+            const [quickPeriod, setQuickPeriod] = useState('year');
+
+            const periodFilteredTbms = useMemo(() => {
+                if (quickPeriod === 'year') return myTbms;
+                const now = new Date();
+                const todayStr = getLocalDateInputValue();
+                if (quickPeriod === 'today') {
+                    return myTbms.filter((tbm) => tbm.date === todayStr);
+                }
+                if (quickPeriod === 'month') {
+                    const month = now.getMonth();
+                    const year = now.getFullYear();
+                    return myTbms.filter((tbm) => {
+                        const d = new Date(tbm.date);
+                        return d.getFullYear() === year && d.getMonth() === month;
+                    });
+                }
+                if (quickPeriod === 'week') {
+                    const day = now.getDay() || 7;
+                    const weekStart = new Date(now);
+                    weekStart.setHours(0, 0, 0, 0);
+                    weekStart.setDate(now.getDate() - day + 1);
+                    const weekEnd = new Date(weekStart);
+                    weekEnd.setDate(weekStart.getDate() + 7);
+                    return myTbms.filter((tbm) => {
+                        const d = new Date(tbm.date);
+                        return d >= weekStart && d < weekEnd;
+                    });
+                }
+                return myTbms;
+            }, [myTbms, quickPeriod]);
+
             const filteredTbms = useMemo(() => {
                 const q = searchKeyword.trim().toLowerCase();
-                if (!q) return myTbms;
-                return myTbms.filter((tbm) =>
+                if (!q) return periodFilteredTbms;
+                return periodFilteredTbms.filter((tbm) =>
                     String(tbm.workName || '').toLowerCase().includes(q) ||
                     String(tbm.leader || '').toLowerCase().includes(q) ||
                     String(tbm.createdBy || '').toLowerCase().includes(q)
                 );
-            }, [myTbms, searchKeyword]);
+            }, [periodFilteredTbms, searchKeyword]);
 
             return (
                 <div className="bg-white rounded-xl shadow border border-gray-200 animate-fade-in-up">
@@ -1034,6 +1066,13 @@
                     )}
 
                     <div className="px-6 pb-4">
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                            <button onClick={() => setQuickPeriod('today')} className={`px-2.5 py-1 text-xs rounded-full border ${quickPeriod === 'today' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300'}`}>오늘</button>
+                            <button onClick={() => setQuickPeriod('week')} className={`px-2.5 py-1 text-xs rounded-full border ${quickPeriod === 'week' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300'}`}>이번주</button>
+                            <button onClick={() => setQuickPeriod('month')} className={`px-2.5 py-1 text-xs rounded-full border ${quickPeriod === 'month' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300'}`}>이번달</button>
+                            <button onClick={() => setQuickPeriod('year')} className={`px-2.5 py-1 text-xs rounded-full border ${quickPeriod === 'year' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300'}`}>{currentYear}년</button>
+                            <span className="text-xs text-gray-400 ml-auto">총 {filteredTbms.length}건</span>
+                        </div>
                         <div className="flex items-center gap-2">
                             <i className="fas fa-search text-gray-400"></i>
                             <input
@@ -1054,18 +1093,20 @@
                                     <th className="p-4 font-medium">부서</th>
                                     <th className="p-4 font-medium">작업명</th>
                                     <th className="p-4 font-medium">리더</th>
+                                    <th className="p-4 font-medium">최종수정</th>
                                     <th className="p-4 font-medium text-center">관리</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                                 {filteredTbms.length === 0 ? (
-                                    <tr><td colSpan="5" className="p-8 text-center text-gray-400">{currentYear}년도 등록된 TBM 내역이 없습니다.</td></tr>
+                                    <tr><td colSpan="6" className="p-8 text-center text-gray-400">{currentYear}년도 등록된 TBM 내역이 없습니다.</td></tr>
                                 ) : filteredTbms.map(tbm => (
                                     <tr key={tbm.id} className="hover:bg-gray-50 transition">
                                         <td className="p-4 text-sm text-gray-600 font-bold">{getFormattedWeek(tbm.date)}<div className="text-xs text-gray-400 font-normal">{tbm.date}</div></td>
                                         <td className="p-4 text-sm font-bold text-indigo-600">{tbm.department}</td>
                                         <td className="p-4 text-sm font-medium text-gray-800">{tbm.workName}</td>
                                         <td className="p-4 text-sm text-gray-600">{tbm.leader}</td>
+                                        <td className="p-4 text-xs text-gray-500">{tbm.updatedAt ? new Date(tbm.updatedAt).toLocaleString() : '-'}</td>
                                         <td className="p-4 text-center">
                                             <div className="flex justify-center gap-2">
                                                 <button onClick={() => onEdit(tbm)} className="text-indigo-500 hover:bg-indigo-50 p-2 rounded text-xs border border-indigo-200"><i className="fas fa-edit"></i> 수정</button>
@@ -1090,6 +1131,7 @@
                                 <div className="text-sm text-indigo-600 font-bold mb-1">{tbm.department}</div>
                                 <div className="text-sm font-medium text-gray-800 mb-1">{tbm.workName}</div>
                                 <div className="text-sm text-gray-600 mb-3">리더: {tbm.leader}</div>
+                                <div className="text-xs text-gray-500 mb-3">최종수정: {tbm.updatedAt ? new Date(tbm.updatedAt).toLocaleString() : '-'}</div>
                                 <div className="flex flex-wrap gap-2">
                                     <button onClick={() => onEdit(tbm)} className="text-indigo-500 hover:bg-indigo-50 px-3 py-1.5 rounded text-xs border border-indigo-200"><i className="fas fa-edit mr-1"></i>수정</button>
                                     <button onClick={() => onDelete(tbm.id)} className="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded text-xs border border-red-200"><i className="fas fa-trash mr-1"></i>삭제</button>
@@ -1178,7 +1220,6 @@
         const TBMFormView = ({ user, setView, showToast, setLoading, initialData }) => {
             const [form, setForm] = useState(initialData || {
                 date: getLocalDateInputValue(),
-                // Updated default times
                 startTime: '09:00',
                 endTime: '18:00',
                 temperature: '',
@@ -1192,7 +1233,6 @@
                 leader: user.username,
                 preChecks: { check1: false, check2: false, check3: false },
                 safetyActionChecks: [],
-                // New Fields
                 dailyCheckResult: '특이사항 없음',
                 photoUrl: '',
                 attendees: [{ name: user.username || '', signed: false, signatureUrl: '', isLeader: true }]
@@ -1207,6 +1247,20 @@
                 checks: true,
                 attendees: false
             });
+            const [autoSaveState, setAutoSaveState] = useState('idle');
+            const [draftRestored, setDraftRestored] = useState(false);
+            const [didAutoLoadPrevious, setDidAutoLoadPrevious] = useState(false);
+            const [validationErrors, setValidationErrors] = useState([]);
+            const [sectionOpen, setSectionOpen] = useState({
+                overview: true,
+                risks: true,
+                checks: true,
+                attendees: true
+            });
+            const workNameRef = useRef(null);
+            const locationRef = useRef(null);
+            const leaderNameRef = useRef(null);
+            const leaderSignatureRef = useRef(null);
             const draftKey = `tbm_draft_${user.department}`;
 
             useEffect(() => {
@@ -1216,6 +1270,7 @@
                 try {
                     const saved = JSON.parse(raw);
                     setForm(prev => ({ ...prev, ...saved }));
+                    setDraftRestored(true);
                     showToast("이전에 작성 중이던 내용을 불러왔습니다.", "info");
                 } catch (err) {
                     console.warn("임시저장 데이터 파싱 실패:", err);
@@ -1224,27 +1279,42 @@
 
             useEffect(() => {
                 if (initialData) return;
+                setAutoSaveState('saving');
                 const timer = setTimeout(() => {
                     try {
                         localStorage.setItem(draftKey, JSON.stringify(form));
+                        setAutoSaveState('saved');
                     } catch (err) {
                         console.warn("임시저장 실패:", err);
+                        setAutoSaveState('error');
                     }
-                }, 1000);
+                }, 900);
                 return () => clearTimeout(timer);
             }, [form, initialData]);
+
+            const toggleSection = (key) => {
+                setSectionOpen((prev) => ({ ...prev, [key]: !prev[key] }));
+            };
 
             const addRiskRow = () => setForm(p => ({...p, risks: [...p.risks, { id: Date.now(), factor: '', measure: '', result: 'yes', action: '' }]}));
             const updateRisk = (id, f, v) => setForm(p => ({...p, risks: p.risks.map(r => r.id===id ? {...r, [f]: v} : r)}));
             const removeRisk = (id) => setForm(p => ({...p, risks: p.risks.filter(r => r.id !== id)}));
+            const duplicateRiskRow = (id) => {
+                setForm((prev) => {
+                    const idx = prev.risks.findIndex((r) => r.id === id);
+                    if (idx < 0) return prev;
+                    const source = prev.risks[idx];
+                    const copy = { ...source, id: Date.now() + Math.floor(Math.random() * 1000) };
+                    const next = [...prev.risks];
+                    next.splice(idx + 1, 0, copy);
+                    return { ...prev, risks: next };
+                });
+            };
             const addAttendee = () => setForm(p => ({...p, attendees: [...p.attendees, { name: '', signed: false, signatureUrl: '', isLeader: false }]}));
-            
-            // New: Remove Attendee Function
+
             const removeAttendee = (idx) => {
                 const newAtt = form.attendees.filter((_, i) => i !== idx);
                 setForm({ ...form, attendees: newAtt });
-
-                // 삭제 후 서명 대상 인덱스가 어긋나지 않도록 보정
                 if (currentSignerIndex !== null) {
                     if (currentSignerIndex === idx) {
                         setShowSignModal(false);
@@ -1278,7 +1348,7 @@
                 setForm({ ...form, attendees: newAtt });
                 setCurrentSignerIndex(null);
             };
-            
+
             const buildSafetyActionChecksFromRisks = (risks) => {
                 return (risks || [])
                     .filter(r => String(r.factor || '').trim() !== '')
@@ -1324,7 +1394,8 @@
                 return next;
             };
 
-            const handleLoadPrevious = async () => {
+            const handleLoadPrevious = async (opts = {}) => {
+                const { silent = false } = opts;
                 try {
                     setLoading(true);
                     const q = query(
@@ -1338,7 +1409,7 @@
                         .find(d => !initialData || d.id !== initialData.id);
 
                     if (!prev) {
-                        showToast("복사할 이전 TBM 데이터가 없습니다.", "info");
+                        if (!silent) showToast("복사할 이전 TBM 데이터가 없습니다.", "info");
                         return;
                     }
 
@@ -1380,19 +1451,56 @@
                             attendees: normalizeAttendees(cur.attendees)
                         })
                     }));
-                    showToast("전주 주요 내용을 복사했습니다. 날짜/시간만 확인 후 저장하세요.", "success");
+                    if (!silent) showToast("전주 주요 내용을 복사했습니다. 날짜/시간만 확인 후 저장하세요.", "success");
                 } catch (err) {
                     console.error("전주 내용 복사 실패:", err);
-                    showToast("이전 데이터 복사 중 오류가 발생했습니다.", "error");
+                    if (!silent) showToast("이전 데이터 복사 중 오류가 발생했습니다.", "error");
                 } finally {
                     setLoading(false);
                 }
             };
 
-            // Photo Upload
-            const handlePhotoUpload = (e) => {
+            useEffect(() => {
+                if (initialData || draftRestored || didAutoLoadPrevious) return;
+                setDidAutoLoadPrevious(true);
+                handleLoadPrevious({ silent: true });
+            }, [initialData, draftRestored, didAutoLoadPrevious]);
+
+            const compressImageFile = (file) => new Promise((resolve, reject) => {
+                const img = new Image();
+                const blobUrl = URL.createObjectURL(file);
+                img.onload = () => {
+                    const maxWidth = 1600;
+                    const ratio = Math.min(1, maxWidth / img.width);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = Math.round(img.width * ratio);
+                    canvas.height = Math.round(img.height * ratio);
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) {
+                        URL.revokeObjectURL(blobUrl);
+                        reject(new Error('canvas context unavailable'));
+                        return;
+                    }
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+                    URL.revokeObjectURL(blobUrl);
+                    resolve(dataUrl);
+                };
+                img.onerror = () => {
+                    URL.revokeObjectURL(blobUrl);
+                    reject(new Error('image load failed'));
+                };
+                img.src = blobUrl;
+            });
+
+            const handlePhotoUpload = async (e) => {
                 const file = e.target.files[0];
-                if (file) {
+                if (!file) return;
+                try {
+                    const compressed = await compressImageFile(file);
+                    setForm(prev => ({...prev, photoUrl: compressed}));
+                    showToast('사진을 최적화해서 첨부했습니다.', 'success');
+                } catch (err) {
                     const reader = new FileReader();
                     reader.onloadend = () => {
                         setForm(prev => ({...prev, photoUrl: reader.result}));
@@ -1401,15 +1509,35 @@
                 }
             };
 
+            const scrollToErrorField = (key) => {
+                const map = {
+                    workName: workNameRef,
+                    location: locationRef,
+                    leaderName: leaderNameRef,
+                    leaderSignature: leaderSignatureRef
+                };
+                const target = map[key]?.current;
+                if (!target) return;
+                setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+            };
+
             const handleSubmit = async () => {
                 if (submitting) return;
-                const missing = [];
-                if(!form.workName?.trim()) missing.push("작업명");
-                if(!form.location?.trim()) missing.push("장소");
-                if (missing.length) return showToast(`저장하려면 ${missing.join(", ")}만 입력해 주세요.`, "info");
+                const nextErrors = [];
+                if (!form.workName?.trim()) nextErrors.push({ key: 'workName', label: '작업명' });
+                if (!form.location?.trim()) nextErrors.push({ key: 'location', label: '장소' });
                 const leader = (form.attendees || []).find(att => att.isLeader);
-                if (!leader || !leader.name?.trim()) return showToast("리더(대표 참석자) 이름을 입력해 주세요.", "info");
-                if (!leader.signatureUrl) return showToast("리더(대표 참석자) 서명을 완료해 주세요.", "info");
+                if (!leader || !leader.name?.trim()) nextErrors.push({ key: 'leaderName', label: '리더 이름' });
+                if (!leader?.signatureUrl) nextErrors.push({ key: 'leaderSignature', label: '리더 서명' });
+
+                if (nextErrors.length) {
+                    setValidationErrors(nextErrors);
+                    setSectionOpen((prev) => ({ ...prev, overview: true, attendees: true }));
+                    showToast(`필수 입력 누락: ${nextErrors.map((e) => e.label).join(', ')}`, "info");
+                    scrollToErrorField(nextErrors[0].key);
+                    return;
+                }
+                setValidationErrors([]);
                 setSubmitting(true);
                 setLoading(true);
                 try {
@@ -1439,9 +1567,21 @@
                     }
                     if (!initialData) localStorage.removeItem(draftKey);
                     setView('list');
-                } catch (err) { showToast("오류 발생", "error"); }
+                } catch (err) {
+                    showToast("오류 발생", "error");
+                }
                 setLoading(false);
                 setSubmitting(false);
+            };
+
+            const renderSectionTitle = (key, title, tone = 'gray') => {
+                const toneClass = tone === 'yellow' ? 'text-yellow-800 border-yellow-200 bg-yellow-50' : 'text-gray-700 border-gray-200 bg-gray-50';
+                return (
+                    <button type="button" onClick={() => toggleSection(key)} className={`w-full flex items-center justify-between p-3 rounded-lg border ${toneClass}`}>
+                        <span className="font-bold">{title}</span>
+                        <i className={`fas fa-chevron-${sectionOpen[key] ? 'up' : 'down'} text-xs`}></i>
+                    </button>
+                );
             };
 
             return (
@@ -1450,13 +1590,14 @@
                         <h2 className="text-xl font-bold"><i className="fas fa-edit mr-2"></i>{initialData ? "TBM 수정" : "TBM 등록"}</h2>
                         <span className="text-sm bg-gray-700 px-3 py-1 rounded">{user.department}</span>
                     </div>
-                    <div className="p-4 sm:p-6 md:p-8 space-y-8">
+                    <div className="p-4 sm:p-6 md:p-8 space-y-5">
                         <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 relative">
-                            <div className="text-xs text-indigo-900 whitespace-nowrap">
-                                필수 입력: <span className="font-bold">작업명·장소·리더서명</span>만 완료 후 저장 가능 (나머지는 필요 시 선택 입력)
+                            <div className="text-xs text-indigo-900">
+                                필수 입력: <span className="font-bold">작업명·장소·리더서명</span>만 완료 후 저장 가능
+                                <span className="ml-2 text-indigo-600">임시저장 상태: {autoSaveState === 'saving' ? '저장 중...' : autoSaveState === 'saved' ? '저장됨' : autoSaveState === 'error' ? '실패' : '-'}</span>
                             </div>
                             <div className="flex flex-wrap gap-1">
-                                <button onClick={handleLoadPrevious} className="shrink-0 px-2.5 py-1.5 bg-white border border-blue-300 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-50">
+                                <button onClick={() => handleLoadPrevious()} className="shrink-0 px-2.5 py-1.5 bg-white border border-blue-300 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-50">
                                     <i className="fas fa-copy mr-1"></i>전주복사
                                 </button>
                                 <div className="relative">
@@ -1484,134 +1625,176 @@
                             </div>
                         </div>
 
-                        <section>
-                            <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">1. 작업 개요</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label className="label-text">일시</label>
-                                    <div className="flex gap-2 items-center flex-wrap">
-                                        <input type="date" className="input-field flex-grow" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} />
-                                        <div className="flex items-center gap-1">
-                                            <input type="time" className="input-field w-24" value={form.startTime} onChange={e=>setForm({...form, startTime:e.target.value})} />
-                                            <span>~</span>
-                                            <input type="time" className="input-field w-24" value={form.endTime} onChange={e=>setForm({...form, endTime:e.target.value})} />
+                        {validationErrors.length > 0 && (
+                            <div className="border border-red-200 bg-red-50 rounded-lg p-3 text-sm text-red-700">
+                                <div className="font-bold mb-1">입력 확인 필요</div>
+                                <div>{validationErrors.map((e) => e.label).join(', ')}</div>
+                            </div>
+                        )}
+
+                        <section className="space-y-3">
+                            {renderSectionTitle('overview', '1. 작업 개요')}
+                            {sectionOpen.overview && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border border-gray-100 rounded-lg p-4">
+                                    <div>
+                                        <label className="label-text">일시</label>
+                                        <div className="flex gap-2 items-center flex-wrap">
+                                            <input type="date" className="input-field flex-grow" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} />
+                                            <div className="flex items-center gap-1">
+                                                <input type="time" className="input-field w-24" value={form.startTime} onChange={e=>setForm({...form, startTime:e.target.value})} />
+                                                <span>~</span>
+                                                <input type="time" className="input-field w-24" value={form.endTime} onChange={e=>setForm({...form, endTime:e.target.value})} />
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                                <div>
-                                    <label className="label-text">장소</label>
-                                    <input type="text" className="input-field" value={form.location} onChange={e=>setForm({...form, location:e.target.value})} />
-                                </div>
-                                <div className="flex gap-4 md:col-span-2">
-                                    <div className="flex-1">
-                                        <label className="label-text">온도 (℃)</label>
-                                        <input type="number" className="input-field" placeholder="예: 25" value={form.temperature} onChange={e=>setForm({...form, temperature:e.target.value})} />
+                                    <div>
+                                        <label className="label-text">장소</label>
+                                        <input ref={locationRef} type="text" className="input-field" value={form.location} onChange={e=>setForm({...form, location:e.target.value})} />
                                     </div>
-                                    <div className="flex-1">
-                                        <label className="label-text">습도 (%)</label>
-                                        <input type="number" className="input-field" placeholder="예: 50" value={form.humidity} onChange={e=>setForm({...form, humidity:e.target.value})} />
+                                    <div className="flex gap-4 md:col-span-2">
+                                        <div className="flex-1">
+                                            <label className="label-text">온도 (℃)</label>
+                                            <input type="number" inputMode="numeric" className="input-field" placeholder="예: 25" value={form.temperature} onChange={e=>setForm({...form, temperature:e.target.value})} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <label className="label-text">습도 (%)</label>
+                                            <input type="number" inputMode="numeric" className="input-field" placeholder="예: 50" value={form.humidity} onChange={e=>setForm({...form, humidity:e.target.value})} />
+                                        </div>
+                                    </div>
+                                    <div className="md:col-span-2"><label className="label-text">작업명</label><input ref={workNameRef} type="text" className="input-field" value={form.workName} onChange={e=>setForm({...form, workName:e.target.value})} /></div>
+                                    <div className="md:col-span-2">
+                                        <label className="label-text flex items-center justify-between">내용 <i className="fas fa-microphone text-gray-400 hover:text-indigo-500 cursor-pointer" title="음성 입력 (지원 예정)"></i></label>
+                                        <textarea className="input-field h-20" value={form.workDesc} onChange={e=>setForm({...form, workDesc:e.target.value})}></textarea>
                                     </div>
                                 </div>
-                                <div className="md:col-span-2"><label className="label-text">작업명</label><input type="text" className="input-field" value={form.workName} onChange={e=>setForm({...form, workName:e.target.value})} /></div>
-                                <div className="md:col-span-2">
-                                    <label className="label-text flex items-center justify-between">내용 <i className="fas fa-microphone text-gray-400 hover:text-indigo-500 cursor-pointer" title="음성 입력 (지원 예정)"></i></label>
-                                    <textarea className="input-field h-20" value={form.workDesc} onChange={e=>setForm({...form, workDesc:e.target.value})}></textarea>
-                                </div>
-                            </div>
+                            )}
                         </section>
 
-                        <section className="bg-yellow-50 p-4 sm:p-6 rounded-lg border border-yellow-200">
-                             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-4">
-                                <h3 className="text-lg font-bold text-yellow-800">2. 위험성 평가</h3>
-                                <div className="flex items-center gap-2"><span className="text-sm font-bold">실시여부</span><input type="checkbox" className="w-5 h-5" checked={form.riskAssessmentDone} onChange={e=>setForm({...form, riskAssessmentDone: e.target.checked})} /></div>
-                            </div>
-                            <div className="space-y-2">
-                                <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-bold text-gray-500 text-center mb-1">
-                                    <div className="col-span-1">No</div>
-                                    <div className="col-span-3">잠재위험요인</div>
-                                    <div className="col-span-3">안전대책</div>
-                                    <div className="col-span-2">조치여부</div>
-                                    <div className="col-span-2">'아니오' 사유</div>
-                                    <div className="col-span-1">삭제</div>
-                                </div>
-                                {form.risks.map((risk, idx) => (
-                                    <div key={risk.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-white p-3 rounded border border-yellow-100">
-                                        <div className="md:col-span-1 text-center font-bold bg-gray-100 rounded-full w-7 h-7 leading-7 mx-auto md:mx-0">{idx+1}</div>
-                                        <div className="md:col-span-3">
-                                            <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">잠재위험요인</label>
-                                            <input type="text" className="input-field py-1 text-sm" placeholder="위험요인" value={risk.factor} onChange={e=>updateRisk(risk.id, 'factor', e.target.value)} />
-                                        </div>
-                                        <div className="md:col-span-3">
-                                            <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">안전대책</label>
-                                            <input type="text" className="input-field py-1 text-sm" placeholder="대책" value={risk.measure} onChange={e=>updateRisk(risk.id, 'measure', e.target.value)} />
-                                        </div>
-                                        <div className="md:col-span-2">
-                                            <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">조치여부</label>
-                                            <select className="input-field py-1 text-xs" value={risk.result || 'yes'} onChange={e=>updateRisk(risk.id, 'result', e.target.value)}>
-                                                <option value="yes">예</option>
-                                                <option value="no">아니오</option>
-                                            </select>
-                                        </div>
-                                        <div className="md:col-span-2">
-                                            <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">'아니오' 사유</label>
-                                            <input type="text" className="input-field py-1 text-xs" placeholder="미조치 사유" value={risk.action || ''} onChange={e=>updateRisk(risk.id, 'action', e.target.value)} disabled={(risk.result || 'yes') === 'yes'} />
-                                        </div>
-                                        <div className="md:col-span-1 text-center"><button onClick={()=>removeRisk(risk.id)} className="text-red-400 px-2 py-1 border rounded md:border-0"><i className="fas fa-times mr-1 md:mr-0"></i><span className="md:hidden">삭제</span></button></div>
+                        <section className="space-y-3">
+                            {renderSectionTitle('risks', '2. 위험성 평가', 'yellow')}
+                            {sectionOpen.risks && (
+                                <div className="bg-yellow-50 p-4 sm:p-6 rounded-lg border border-yellow-200">
+                                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-4">
+                                        <h3 className="text-lg font-bold text-yellow-800">위험성 평가 입력</h3>
+                                        <div className="flex items-center gap-2"><span className="text-sm font-bold">실시여부</span><input type="checkbox" className="w-5 h-5" checked={form.riskAssessmentDone} onChange={e=>setForm({...form, riskAssessmentDone: e.target.checked})} /></div>
                                     </div>
-                                ))}
-                                <button onClick={addRiskRow} className="w-full py-2 border-2 border-dashed border-gray-300 text-gray-500 rounded text-sm hover:bg-white">+ 위험요인 추가</button>
-                            </div>
-                            <div className="mt-4"><label className="label-text text-red-600 font-bold">중점 위험요인 선택</label><select className="input-field" value={form.keyRiskId} onChange={e=>setForm({...form, keyRiskId: e.target.value})}><option value="">선택하세요</option>{form.risks.map((r,i)=>(<option key={r.id} value={r.id}>{i+1}. {r.factor}</option>))}</select></div>
+                                    <div className="space-y-2">
+                                        <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-bold text-gray-500 text-center mb-1">
+                                            <div className="col-span-1">No</div>
+                                            <div className="col-span-3">잠재위험요인</div>
+                                            <div className="col-span-3">안전대책</div>
+                                            <div className="col-span-2">조치여부</div>
+                                            <div className="col-span-2">'아니오' 사유</div>
+                                            <div className="col-span-1">관리</div>
+                                        </div>
+                                        {form.risks.map((risk, idx) => (
+                                            <div key={risk.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-white p-3 rounded border border-yellow-100">
+                                                <div className="md:col-span-1 text-center font-bold bg-gray-100 rounded-full w-7 h-7 leading-7 mx-auto md:mx-0">{idx+1}</div>
+                                                <div className="md:col-span-3">
+                                                    <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">잠재위험요인</label>
+                                                    <input type="text" className="input-field py-1 text-sm" placeholder="위험요인" value={risk.factor} onChange={e=>updateRisk(risk.id, 'factor', e.target.value)} />
+                                                </div>
+                                                <div className="md:col-span-3">
+                                                    <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">안전대책</label>
+                                                    <input type="text" className="input-field py-1 text-sm" placeholder="대책" value={risk.measure} onChange={e=>updateRisk(risk.id, 'measure', e.target.value)} />
+                                                </div>
+                                                <div className="md:col-span-2">
+                                                    <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">조치여부</label>
+                                                    <select className="input-field py-1 text-xs" value={risk.result || 'yes'} onChange={e=>updateRisk(risk.id, 'result', e.target.value)}>
+                                                        <option value="yes">예</option>
+                                                        <option value="no">아니오</option>
+                                                    </select>
+                                                </div>
+                                                <div className="md:col-span-2">
+                                                    <label className="md:hidden block text-xs font-bold text-gray-500 mb-1">'아니오' 사유</label>
+                                                    <input type="text" className="input-field py-1 text-xs" placeholder="미조치 사유" value={risk.action || ''} onChange={e=>updateRisk(risk.id, 'action', e.target.value)} disabled={(risk.result || 'yes') === 'yes'} />
+                                                </div>
+                                                <div className="md:col-span-1 text-center flex md:block gap-1 justify-center">
+                                                    <button onClick={()=>duplicateRiskRow(risk.id)} className="text-blue-500 px-2 py-1 border rounded md:border-0 text-xs"><i className="fas fa-clone mr-1 md:mr-0"></i><span className="md:hidden">복제</span></button>
+                                                    <button onClick={()=>removeRisk(risk.id)} className="text-red-400 px-2 py-1 border rounded md:border-0 text-xs"><i className="fas fa-times mr-1 md:mr-0"></i><span className="md:hidden">삭제</span></button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        <button onClick={addRiskRow} className="w-full py-2 border-2 border-dashed border-gray-300 text-gray-500 rounded text-sm hover:bg-white">+ 위험요인 추가</button>
+                                    </div>
+                                    <div className="mt-4"><label className="label-text text-red-600 font-bold">중점 위험요인 선택</label><select className="input-field" value={form.keyRiskId} onChange={e=>setForm({...form, keyRiskId: e.target.value})}><option value="">선택하세요</option>{form.risks.map((r,i)=>(<option key={r.id} value={r.id}>{i+1}. {r.factor}</option>))}</select></div>
+                                </div>
+                            )}
                         </section>
 
-                        <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                            <div>
-                                <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">4. 작업 전 안전 점검 (Checklist)</h3>
-                                <div className="space-y-2 mb-6">
-                                    <label className="flex items-center p-2 border rounded bg-white"><input type="checkbox" className="mr-2" checked={form.preChecks.check1} onChange={e=>setForm({...form, preChecks:{...form.preChecks, check1:e.target.checked}})} />보호구 착용</label>
-                                    <label className="flex items-center p-2 border rounded bg-white"><input type="checkbox" className="mr-2" checked={form.preChecks.check2} onChange={e=>setForm({...form, preChecks:{...form.preChecks, check2:e.target.checked}})} />장비 점검</label>
-                                    <label className="flex items-center p-2 border rounded bg-white"><input type="checkbox" className="mr-2" checked={form.preChecks.check3} onChange={e=>setForm({...form, preChecks:{...form.preChecks, check3:e.target.checked}})} />건강 상태</label>
-                                </div>
-                                <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">작업 전 일일 안전점검 시행 결과</h3>
-                                <textarea className="input-field h-[184px]" placeholder="특이사항 없음" value={form.dailyCheckResult} onChange={e=>setForm({...form, dailyCheckResult:e.target.value})}></textarea>
-                            </div>
-                            <div>
-                                <h3 className="text-lg font-bold text-gray-700 mb-3 border-b pb-2">5. 참석자 ({form.attendees.length}명)</h3>
-                                <div className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded p-2 mb-3">
-                                    참석자 이름은 모두 기록하고, 서명은 리더 1명만 필수입니다. 추가 참석자 서명은 선택입니다.
-                                </div>
-                                <div className="bg-gray-50 p-4 rounded h-40 overflow-y-auto space-y-2 mb-3">
-                                    {form.attendees.map((att, idx) => (
-                                        <div key={idx} className="flex items-center gap-2 bg-white p-2 rounded border shadow-sm">
-                                            <div className={`w-12 shrink-0 text-center px-1 py-1 rounded text-xs font-bold ${att.isLeader ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700'}`}>
-                                                {att.isLeader ? '리더' : '참석'}
-                                            </div>
-                                            <input type="text" placeholder={att.isLeader ? "리더 이름" : "참석자 이름"} className="border border-gray-300 rounded px-3 py-2 text-sm w-20 sm:w-28 md:w-32 shrink-0 text-center font-bold outline-none focus:ring-2 focus:ring-indigo-500 h-12" value={att.name} onChange={e=>updateAttendee(idx, e.target.value)} disabled={att.signed} />
-                                            <div onClick={()=>!att.signed && openSignModal(idx)} className={`flex-1 min-w-0 h-12 border rounded flex items-center justify-center cursor-pointer transition ${att.signed ? 'bg-white border-indigo-500' : 'bg-gray-50 border-dashed hover:bg-indigo-50'}`}>
-                                                {att.signed && att.signatureUrl ? <img src={att.signatureUrl} alt="서명" className="h-full object-contain" /> : <span className="text-sm text-gray-400 font-bold whitespace-nowrap"><i className="fas fa-file-signature mr-1"></i>{att.isLeader ? '리더 서명(필수)' : '서명 생략 가능'}</span>}
-                                            </div>
-                                            {!att.isLeader && (
-                                                <button onClick={() => removeAttendee(idx)} className="w-8 h-8 shrink-0 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition" title="참석자 삭제">
-                                                    <i className="fas fa-minus-circle"></i>
-                                                </button>
+                        <section className="space-y-3">
+                            {renderSectionTitle('checks', '3. 안전점검 및 점검결과')}
+                            {sectionOpen.checks && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border border-gray-100 rounded-lg p-4">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">작업 전 안전 점검 (Checklist)</h3>
+                                        <div className="space-y-2 mb-6">
+                                            <label className="flex items-center p-2 border rounded bg-white"><input type="checkbox" className="mr-2" checked={form.preChecks.check1} onChange={e=>setForm({...form, preChecks:{...form.preChecks, check1:e.target.checked}})} />보호구 착용</label>
+                                            <label className="flex items-center p-2 border rounded bg-white"><input type="checkbox" className="mr-2" checked={form.preChecks.check2} onChange={e=>setForm({...form, preChecks:{...form.preChecks, check2:e.target.checked}})} />장비 점검</label>
+                                            <label className="flex items-center p-2 border rounded bg-white"><input type="checkbox" className="mr-2" checked={form.preChecks.check3} onChange={e=>setForm({...form, preChecks:{...form.preChecks, check3:e.target.checked}})} />건강 상태</label>
+                                        </div>
+                                        <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">작업 전 일일 안전점검 시행 결과</h3>
+                                        <textarea className="input-field h-[184px]" placeholder="특이사항 없음" value={form.dailyCheckResult} onChange={e=>setForm({...form, dailyCheckResult:e.target.value})}></textarea>
+                                    </div>
+                                    <div>
+                                        <h3 className="text-lg font-bold text-gray-700 mb-3 border-b pb-2">6. TBM 활동 사진 첨부</h3>
+                                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-50 transition relative">
+                                            <input type="file" accept="image/*" onChange={handlePhotoUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                                            {form.photoUrl ? (
+                                                <img src={form.photoUrl} alt="Preview" className="max-h-32 mx-auto rounded shadow" />
+                                            ) : (
+                                                <div className="text-gray-400"><i className="fas fa-camera text-3xl mb-2"></i><br/>클릭하여 사진 촬영/업로드</div>
                                             )}
                                         </div>
-                                    ))}
-                                    <button onClick={addAttendee} className="w-full py-2 bg-indigo-50 text-indigo-600 font-bold rounded text-sm hover:bg-indigo-100">+ 참석자 추가(선택)</button>
+                                    </div>
                                 </div>
-                                <h3 className="text-lg font-bold text-gray-700 mb-3 border-b pb-2">6. TBM 활동 사진 첨부</h3>
-                                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-50 transition relative">
-                                    <input type="file" accept="image/*" onChange={handlePhotoUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                                    {form.photoUrl ? (
-                                        <img src={form.photoUrl} alt="Preview" className="max-h-32 mx-auto rounded shadow" />
-                                    ) : (
-                                        <div className="text-gray-400"><i className="fas fa-camera text-3xl mb-2"></i><br/>클릭하여 사진 촬영/업로드</div>
-                                    )}
-                                </div>
-                            </div>
+                            )}
                         </section>
-                        <div className="pt-6 border-t flex flex-col-reverse sm:flex-row justify-end gap-3 sm:gap-4">
-                            <button onClick={()=>setView('list')} className="w-full sm:w-auto px-6 py-3 border rounded">취소</button>
+
+                        <section className="space-y-3">
+                            {renderSectionTitle('attendees', `4. 참석자 (${form.attendees.length}명)`)}
+                            {sectionOpen.attendees && (
+                                <div className="border border-gray-100 rounded-lg p-4">
+                                    <div className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded p-2 mb-3">
+                                        참석자 이름은 모두 기록하고, 서명은 리더 1명만 필수입니다.
+                                    </div>
+                                    <div className="bg-gray-50 p-4 rounded h-48 overflow-y-auto space-y-2 mb-3">
+                                        {form.attendees.map((att, idx) => (
+                                            <div key={idx} className="flex items-center gap-2 bg-white p-2 rounded border shadow-sm">
+                                                <div className={`w-12 shrink-0 text-center px-1 py-1 rounded text-xs font-bold ${att.isLeader ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700'}`}>
+                                                    {att.isLeader ? '리더' : '참석'}
+                                                </div>
+                                                <input
+                                                    ref={att.isLeader ? leaderNameRef : null}
+                                                    type="text"
+                                                    placeholder={att.isLeader ? "리더 이름" : "참석자 이름"}
+                                                    className="border border-gray-300 rounded px-3 py-2 text-sm w-20 sm:w-28 md:w-32 shrink-0 text-center font-bold outline-none focus:ring-2 focus:ring-indigo-500 h-12"
+                                                    value={att.name}
+                                                    onChange={e=>updateAttendee(idx, e.target.value)}
+                                                    disabled={att.signed}
+                                                />
+                                                <div
+                                                    ref={att.isLeader ? leaderSignatureRef : null}
+                                                    onClick={()=>!att.signed && openSignModal(idx)}
+                                                    className={`flex-1 min-w-0 h-12 border rounded flex items-center justify-center cursor-pointer transition ${att.signed ? 'bg-white border-indigo-500' : 'bg-gray-50 border-dashed hover:bg-indigo-50'}`}
+                                                >
+                                                    {att.signed && att.signatureUrl ? <img src={att.signatureUrl} alt="서명" className="h-full object-contain" /> : <span className="text-sm text-gray-400 font-bold whitespace-nowrap"><i className="fas fa-file-signature mr-1"></i>{att.isLeader ? '리더 서명(필수)' : '서명 생략 가능'}</span>}
+                                                </div>
+                                                {!att.isLeader && (
+                                                    <button onClick={() => removeAttendee(idx)} className="w-8 h-8 shrink-0 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition" title="참석자 삭제">
+                                                        <i className="fas fa-minus-circle"></i>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ))}
+                                        <button onClick={addAttendee} className="w-full py-2 bg-indigo-50 text-indigo-600 font-bold rounded text-sm hover:bg-indigo-100">+ 참석자 추가(선택)</button>
+                                    </div>
+                                </div>
+                            )}
+                        </section>
+
+                        <div className="sticky bottom-0 bg-white/95 backdrop-blur border-t pt-3 flex flex-col-reverse sm:flex-row justify-end gap-3 sm:gap-4">
+                            <button onClick={()=>setView('list')} disabled={submitting} className="w-full sm:w-auto px-6 py-3 border rounded disabled:opacity-50">취소</button>
                             <button onClick={handleSubmit} disabled={submitting} className={`w-full sm:w-auto px-8 py-3 text-white rounded font-bold shadow-lg ${submitting ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
                                 {submitting ? <><i className="fas fa-spinner fa-spin mr-2"></i>저장 중...</> : '저장'}
                             </button>
